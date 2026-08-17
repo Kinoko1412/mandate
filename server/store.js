@@ -3,6 +3,7 @@
 const crypto = require('crypto');
 const { session, suppliers, pcfPayloads } = require('./fixtures/bundle');
 const supabaseSync = require('./supabaseSync');
+const { verifySupplierCredentialChain } = require('./vleiCheck');
 
 function deepClone(obj) {
   return JSON.parse(JSON.stringify(obj));
@@ -49,13 +50,18 @@ function getSupplier(supplierId) {
 }
 
 function listSuppliers() {
-  return state.suppliers.map((s) => ({
-    supplierId: s.supplierId,
-    orgName: s.orgName,
-    credentialValid: supplierHasValidCredential(s),
-    credentials: s.credentials,
-    shareRevoked: state.revokedShares.has(s.supplierId),
-  }));
+  return state.suppliers.map((s) => {
+    const chain = verifySupplierCredentialChain(s);
+    return {
+      supplierId: s.supplierId,
+      orgName: s.orgName,
+      credentialValid: supplierHasValidCredential(s),
+      credentials: s.credentials,
+      shareRevoked: state.revokedShares.has(s.supplierId),
+      vlei: s.vlei ? deepClone(s.vlei) : null,
+      vleiChainStatus: chain.chainStatus,
+    };
+  });
 }
 
 function supplierHasValidCredential(supplier) {

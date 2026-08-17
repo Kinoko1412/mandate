@@ -63,6 +63,7 @@ evaluate(ctx):
 | POL-CARB-001 | 4 | PCF 品質最低欄位（缺則拒收） |
 | POL-CARB-002 | 4 | PCF 進階欄位／查驗一致性（缺可警告；假查驗拒收） |
 | POL-REQ-001 | 4 | fetch 供應商回覆須先有索取紀錄 |
+| POL-CRED-001 | 4 | 供應商 vLEI 憑證鏈無效（法人／角色憑證撤銷、過期、I2I 檢查失敗） |
 | POL-EXP-001 | 3／5 | 客戶回覆草稿／稽核匯出 |
 | POL-HITL-010 | 5 | submit_cbam_draft 必須人類確認 |
 | POL-REV-010 | 4／副作用 | 資料分享撤銷後不得再用 |
@@ -216,6 +217,25 @@ THEN decision = DENY_CONSTRAINT
      reason = "Must request emissions from supplier before fetching response."
 ```
 
+### POL-CRED-001 — 供應商 vLEI 憑證鏈無效
+
+適用：`fetch_supplier_response`、`ingest_pcf_payload`。自建 vLEI mock（`server/vleiCheck.js`），仿造 GLEIF→QVI→法人憑證→角色憑證(ECR/OOR) 信任鏈；沒有 `vlei` 欄位的供應商一律視為有效（向下相容，不影響 Demo 三幕）。
+
+```text
+IF toolName in {"fetch_supplier_response", "ingest_pcf_payload"}
+   AND supplier.vlei 存在
+   AND (legalEntityCredential.status == "REVOKED"
+        OR legalEntityCredential 已過期
+        OR 任一 roleCredential.status == "REVOKED"
+        OR 任一 roleCredential 已過期
+        OR 任一 roleCredential.issuerCredentialId != legalEntityCredential.credentialId  // I2I 檢查
+        OR 法人底下無任何角色憑證)
+THEN decision = DENY_CONSTRAINT
+     policyId = "POL-CRED-001"
+```
+
+撤銷動作：`revoke_supplier_credential`（Human-only，比照 `revoke_data_share` 走 `step3_allow` 的 humanSystemExtra 清單）撤銷指定供應商的 `legalEntityCredential`，並連鎖撤銷該供應商自己底下所有 `roleCredentials`（範圍僅限該供應商自己的憑證階層，不影響其他供應商）。
+
 ### POL-EXP-001 — 匯出客戶草稿／稽核
 
 ```text
@@ -314,7 +334,7 @@ THEN decision = DENY_POLICY
 | 1 status | POL-AUTH-001, POL-AUTH-002, POL-AUTH-003 |
 | 2 deny list | POL-GATE-001 |
 | 3 allow | POL-GATE-000, POL-GATE-002, POL-REV-002 |
-| 4 constraints | POL-CARB-001, POL-CARB-002, POL-REQ-001, POL-REV-010 |
+| 4 constraints | POL-CARB-001, POL-CARB-002, POL-REQ-001, POL-REV-010, POL-CRED-001 |
 | 5 L3+ PENDING | POL-HITL-010, POL-GATE-003（Human 匯出） |
 | 6 ALLOW | （選配 `POL-ALLOW-000`） |
 | 副作用 | POL-REV-010（撤銷作廢 pending） |
@@ -348,6 +368,7 @@ THEN ALLOW
 | T11 | 對 REVOKED mandate 復活 | DENY_POLICY | POL-REV-002 |
 | T12 | fetch 無先 request | DENY_CONSTRAINT | POL-REQ-001 |
 | T13 | verified 無 reportId | DENY_CONSTRAINT | POL-CARB-002 |
+| T14 | 供應商法人憑證已撤銷後 ingest/fetch | DENY_CONSTRAINT | POL-CRED-001 |
 
 ---
 
@@ -370,3 +391,4 @@ THEN ALLOW
 | 版本 | 日期 | 說明 |
 |------|------|------|
 | V1 | 2026-07-20 | 碳主線；POL-CARB-001／HITL-010／REV-010；保留 AUTH 狀態條 |
+| V1.1 | 2026-08-17 | 新增 POL-CRED-001（供應商 vLEI 憑證鏈），使用者個人 fork 準備期強化，尚未併回 `1qaz0726-star/mandate:main` |

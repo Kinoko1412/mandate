@@ -62,7 +62,11 @@ function toProductFootprint(payload, supplier) {
     created: new Date().toISOString(),
     status: 'Active',
     companyName,
-    companyIds: payload.supplierId ? [`urn:mandate:supplier:${payload.supplierId}`] : [],
+    companyIds: supplier && supplier.vlei && supplier.vlei.lei
+      ? [`urn:lei:${supplier.vlei.lei}`]
+      : payload.supplierId
+        ? [`urn:mandate:supplier:${payload.supplierId}`]
+        : [],
     productDescription: productName,
     productIds: payload.supplierId ? [`urn:mandate:product:${payload.supplierId}`] : [],
     ...(payload.cnCode

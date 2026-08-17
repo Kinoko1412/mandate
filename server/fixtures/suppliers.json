@@ -17,7 +17,28 @@
         "expiresAt": "2027-01-01T00:00:00+08:00",
         "signatureValid": true
       }
-    ]
+    ],
+    "vlei": {
+      "lei": "5299000QINGH0PARTS56",
+      "legalEntityCredential": {
+        "credentialId": "vc_le_green01",
+        "issuer": "qvi_mock_tabei",
+        "status": "ACTIVE",
+        "issuedAt": "2025-01-01T00:00:00+08:00",
+        "expiresAt": "2027-01-01T00:00:00+08:00"
+      },
+      "roleCredentials": [
+        {
+          "credentialId": "vc_ecr_green01_carbon",
+          "type": "ECR",
+          "role": "碳排放申報專員",
+          "issuerCredentialId": "vc_le_green01",
+          "status": "ACTIVE",
+          "issuedAt": "2025-01-01T00:00:00+08:00",
+          "expiresAt": "2027-01-01T00:00:00+08:00"
+        }
+      ]
+    }
   },
   {
     "supplierId": "supplier_unverified_01",
@@ -28,5 +49,39 @@
     "supplierId": "supplier_blocked_99",
     "orgName": "黑名單供應商（禁止往來）",
     "credentials": []
+  },
+  {
+    "supplierId": "supplier_vlei_demo_01",
+    "orgName": "vLEI 示範供應商",
+    "credentials": [
+      {
+        "credentialId": "vc_carbon_pcf_vleidemo",
+        "type": "CarbonPCF",
+        "issuer": "mock_issuer_tabei",
+        "expiresAt": "2027-01-01T00:00:00+08:00",
+        "signatureValid": true
+      }
+    ],
+    "vlei": {
+      "lei": "5299000VLEID0DEMO089",
+      "legalEntityCredential": {
+        "credentialId": "vc_le_vleidemo01",
+        "issuer": "qvi_mock_tabei",
+        "status": "ACTIVE",
+        "issuedAt": "2025-01-01T00:00:00+08:00",
+        "expiresAt": "2027-01-01T00:00:00+08:00"
+      },
+      "roleCredentials": [
+        {
+          "credentialId": "vc_ecr_vleidemo01_carbon",
+          "type": "ECR",
+          "role": "碳排放申報專員",
+          "issuerCredentialId": "vc_le_vleidemo01",
+          "status": "ACTIVE",
+          "issuedAt": "2025-01-01T00:00:00+08:00",
+          "expiresAt": "2027-01-01T00:00:00+08:00"
+        }
+      ]
+    }
   }
 ]

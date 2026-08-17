@@ -17,5 +17,15 @@
     "supplierId": "supplier_unverified_01",
     "tCO2e": 8.1,
     "notes": "無證：僅有排放量，缺方法／邊界／期間等"
+  },
+  {
+    "supplierId": "supplier_vlei_demo_01",
+    "tCO2e": 5.6,
+    "unit": "tCO2e",
+    "method": "ISO14067",
+    "boundary": "cradle-to-gate",
+    "period": "2025-01-01/2025-12-31",
+    "product": "vLEI 示範零件",
+    "notes": "vLEI 身分示範：資料本身合格，用來展示法人憑證撤銷後的連鎖效果"
   }
 ]

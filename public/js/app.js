@@ -68,6 +68,7 @@ const TOOL_LABEL = {
   export_sensitive: "匯出敏感資料",
   change_mandate: "擅自改授權",
   revoke_mandate: "收回 AI 授權",
+  revoke_supplier_credential: "撤銷供應商法人憑證（vLEI）",
 };
 
 const DECISION_LABEL = {
@@ -391,6 +392,65 @@ function renderSuppliers() {
   }
   const incomplete = [...sel.options].find((o) => o.dataset.verified === "0");
   if (incomplete) sel.value = incomplete.value;
+  renderVleiPanel();
+}
+
+const VLEI_STATUS_LABEL = {
+  VALID: "鏈完整有效",
+  ENTITY_REVOKED: "法人憑證已撤銷",
+  ROLE_REVOKED: "角色憑證已撤銷",
+  EXPIRED: "憑證已過期",
+  BROKEN_LINK: "憑證鏈結構異常",
+  NO_VLEI: "未使用 vLEI",
+};
+
+function renderVleiPanel() {
+  const panel = $("vlei-panel");
+  const chainEl = $("vlei-chain");
+  const btn = $("btn-revoke-vlei");
+  if (!panel || !chainEl) return;
+  const sid = selectedSupplierId();
+  const supplier = state.suppliers.find((s) => (s.supplierId || s.id) === sid);
+  if (!supplier || !supplier.vlei) {
+    panel.hidden = true;
+    return;
+  }
+  panel.hidden = false;
+  const le = supplier.vlei.legalEntityCredential || {};
+  const roles = supplier.vlei.roleCredentials || [];
+  const statusLabel = VLEI_STATUS_LABEL[supplier.vleiChainStatus] || supplier.vleiChainStatus || "—";
+  const leTone = le.status === "REVOKED" ? "tone-deny" : "tone-pass";
+  const rolesHtml =
+    roles
+      .map((r) => {
+        const tone = r.status === "REVOKED" ? "tone-deny" : "tone-pass";
+        return `<div class="vlei-role-row"><span class="result-decision-badge ${tone}">${escapeHtml(r.role || r.type || "角色憑證")} · ${escapeHtml(r.status || "—")}</span></div>`;
+      })
+      .join("") || '<p class="case-empty">無角色憑證</p>';
+  chainEl.innerHTML = `
+    <div class="vlei-chain-row">GLEIF → QVI（${escapeHtml(le.issuer || "—")}）→
+      <span class="result-decision-badge ${leTone}">法人憑證 ${escapeHtml(le.status || "—")}</span>
+    </div>
+    <div class="vlei-roles">${rolesHtml}</div>
+    <p class="vlei-lei">LEI：${escapeHtml(supplier.vlei.lei || "—")} · 鏈狀態：${escapeHtml(statusLabel)}</p>
+  `;
+  if (btn) btn.disabled = le.status === "REVOKED";
+}
+
+async function revokeSupplierCredential() {
+  const supplierId = selectedSupplierId();
+  if (!supplierId) {
+    showError("請先選供應商");
+    return;
+  }
+  await callTool("revoke_supplier_credential", { supplierId, actorType: "HUMAN", asApprover: true });
+  try {
+    const suppliersData = await api("/suppliers");
+    state.suppliers = normalizeList(suppliersData, "suppliers", "items", "data");
+  } catch {
+    /* keep stale list on failure */
+  }
+  renderVleiPanel();
 }
 
 function renderEvents() {
@@ -1160,7 +1220,11 @@ function bind() {
   });
   $("btn-request")?.addEventListener("click", () => callTool("request_emissions"));
   $("btn-fetch")?.addEventListener("click", () => callTool("fetch_supplier_response"));
-  $("supplier-select")?.addEventListener("change", () => refreshResultUi());
+  $("supplier-select")?.addEventListener("change", () => {
+    refreshResultUi();
+    renderVleiPanel();
+  });
+  $("btn-revoke-vlei")?.addEventListener("click", revokeSupplierCredential);
   $("btn-ingest")?.addEventListener("click", manualIngest);
   $("btn-submit")?.addEventListener("click", () => callTool("submit_cbam_draft"));
   $("btn-revoke-share")?.addEventListener("click", revokeShare);

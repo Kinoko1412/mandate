@@ -4,6 +4,7 @@ const { evaluate } = require('./policy');
 const store = require('./store');
 const { plainReason } = require('./plainReason');
 const { enrichPayloadWithQualityTier } = require('./pcfCheck');
+const vleiCheck = require('./vleiCheck');
 
 function runEvaluate(toolName, input, actor, approval) {
   const state = store.getState();
@@ -89,6 +90,18 @@ function executeTool(toolName, input) {
       ok: true,
       ...result,
       message: '已撤銷這家供應商的數據使用權。',
+    };
+  }
+  if (toolName === 'revoke_supplier_credential') {
+    const supplier = store.getSupplier(input.supplierId);
+    const result = vleiCheck.revokeLegalEntityCredential(supplier);
+    return {
+      ok: true,
+      supplierId: input.supplierId,
+      ...result,
+      message: result.revoked
+        ? `已撤銷法人憑證，${result.cascadedRoles} 張角色憑證同步失效。`
+        : '此供應商沒有 vLEI 法人憑證可撤銷。',
     };
   }
   if (toolName === 'export_client_draft') {

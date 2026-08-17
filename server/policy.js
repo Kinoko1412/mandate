@@ -9,6 +9,7 @@ const {
   hasPcfQualityFields,
   checkVerificationConsistency,
 } = require('./pcfCheck');
+const { verifySupplierCredentialChain } = require('./vleiCheck');
 
 const TOOL_REGISTRY = new Set([
   'request_emissions',
@@ -22,6 +23,7 @@ const TOOL_REGISTRY = new Set([
   'export_audit',
   'change_mandate',
   'revoke_mandate',
+  'revoke_supplier_credential',
 ]);
 
 const PCF_REQUIRED_FIELDS = [
@@ -293,6 +295,7 @@ function step3_allow(ctx) {
       (toolName === 'commit_cbam_draft' ||
         toolName === 'revoke_data_share' ||
         toolName === 'revoke_mandate' ||
+        toolName === 'revoke_supplier_credential' ||
         toolName === 'export_sensitive' ||
         toolName === 'export_client_draft' ||
         toolName === 'export_audit');
@@ -337,8 +340,28 @@ function step4_constraints(ctx) {
     staging,
     emissionsRequests,
     getPcfPayload,
+    getSupplier,
     approval,
   } = ctx;
+
+  const vleiCheckedTools = new Set(['fetch_supplier_response', 'ingest_pcf_payload']);
+  if (vleiCheckedTools.has(toolName) && supplierId && typeof getSupplier === 'function') {
+    const supplier = getSupplier(supplierId);
+    const chain = verifySupplierCredentialChain(supplier);
+    if (!chain.valid) {
+      return {
+        trace: traceEntry(STEP_META[3], 'fail', {
+          policyId: 'POL-CRED-001',
+          detail: `供應商 ${supplierId} 的 vLEI 憑證鏈無效（${chain.chainStatus}）：${chain.detail}`,
+        }),
+        outcome: result(
+          'DENY_CONSTRAINT',
+          'POL-CRED-001',
+          `Supplier vLEI credential chain invalid (${chain.chainStatus}): ${chain.detail}`
+        ),
+      };
+    }
+  }
 
   const shareRevokedTools = new Set([
     'ingest_pcf_payload',

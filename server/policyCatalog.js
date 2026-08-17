@@ -73,6 +73,13 @@ const POLICIES = [
     summary: 'IF fetch 前未 request_emissions 或無 PCF 回覆 THEN 拒絕。',
   },
   {
+    policyId: 'POL-CRED-001',
+    title: '供應商 vLEI 憑證鏈無效',
+    evalStep: 4,
+    decisions: ['DENY_CONSTRAINT'],
+    summary: 'IF fetch/ingest 時供應商法人憑證或角色憑證已撤銷/過期/I2I 檢查失敗 THEN 拒絕。',
+  },
+  {
     policyId: 'POL-EXP-001',
     title: '匯出客戶草稿／稽核',
     evalStep: 2,

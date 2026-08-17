@@ -30,6 +30,9 @@ function plainReason(decision, policyId, reason, input) {
     }
     return '進階欄位不完整：可暫存內部使用，但對外申報前建議補齊 CN 碼、單位排放或查驗狀態。';
   }
+  if (policyId === 'POL-CRED-001') {
+    return '這家供應商的 vLEI 身分憑證鏈已失效（法人憑證或簽署角色憑證被撤銷／過期），在重新取得有效憑證前，不能再收這批碳數據。';
+  }
   if (policyId === 'POL-REQ-001') {
     return '尚未向這家供應商索取碳數據，不能直接取回覆。請先執行「索取碳數據」。';
   }

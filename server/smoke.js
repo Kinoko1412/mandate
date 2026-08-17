@@ -273,6 +273,46 @@ check('12 submit staged revoked flag', 'DENY_CONSTRAINT', 'POL-CARB-001', {
   emissionsRequests: requestsGreen,
 });
 
+const vleiDemoSupplierRevoked = {
+  supplierId: 'supplier_vlei_demo_01',
+  orgName: 'vLEI 示範供應商',
+  vlei: {
+    lei: '5299000VLEID0DEMO089',
+    legalEntityCredential: { credentialId: 'vc_le_vleidemo01', status: 'REVOKED', expiresAt: FUTURE },
+    roleCredentials: [
+      { credentialId: 'vc_ecr_vleidemo01_carbon', issuerCredentialId: 'vc_le_vleidemo01', status: 'REVOKED', expiresAt: FUTURE },
+    ],
+  },
+};
+
+check('13 ingest after vLEI legal entity revoked', 'DENY_CONSTRAINT', 'POL-CRED-001', {
+  mandate: baseMandate(),
+  actor: agentActor,
+  principal,
+  agent,
+  toolName: 'ingest_pcf_payload',
+  input: { ...greenPayload, supplierId: 'supplier_vlei_demo_01' },
+  now: NOW,
+  staging: new Map(),
+  revokedShares: new Set(),
+  emissionsRequests: new Set(),
+  getSupplier: (id) => (id === 'supplier_vlei_demo_01' ? vleiDemoSupplierRevoked : null),
+});
+
+check('14 ingest green (no vlei check regression)', 'ALLOW', 'POL-ALLOW-000', {
+  mandate: baseMandate(),
+  actor: agentActor,
+  principal,
+  agent,
+  toolName: 'ingest_pcf_payload',
+  input: greenPayload,
+  now: NOW,
+  staging: new Map(),
+  revokedShares: new Set(),
+  emissionsRequests: new Set(),
+  getSupplier: () => ({ supplierId: 'supplier_green_01', orgName: '青禾零件股份有限公司' }),
+});
+
 function traceCheck(label, expectedStep, expectedPolicyId, ctx) {
   const out = evaluateWithTrace(ctx);
   const failStep = out.trace.find((t) => t.status === 'fail' || t.status === 'pending');

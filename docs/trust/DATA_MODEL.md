@@ -494,7 +494,7 @@ PcfPayload.shareRevoked → Staging 不可用 → 擋 submit/commit
 
 | Mandate 欄位 | PACT V3 欄位 | 備註 |
 |------|------|------|
-| `supplierId` + supplier `orgName` | `companyName`／`companyIds` | `companyIds` 用 `urn:mandate:supplier:<id>` 佔位，非真實可解析的公司識別碼（如 LEI／D-U-N-S） |
+| `supplierId` + supplier `orgName` | `companyName`／`companyIds` | 有 `vlei.lei`（見第 13 節）的供應商用真實形狀的 `urn:lei:<20碼>`；沒有的仍用 `urn:mandate:supplier:<id>` 佔位，誠實標示非真實可解析的公司識別碼 |
 | `product` | `productDescription`／`productNameCompany` | — |
 | `cnCode` | `productClassifications` | 用 `urn:pact:productclassification:cncode:<碼>`，非 PACT 官方列舉的分類法 |
 | `period`（`YYYY-MM-DD/YYYY-MM-DD`） | `pcf.referencePeriodStart`／`referencePeriodEnd` | 直接切開轉 ISO 8601 |
@@ -519,7 +519,47 @@ PACT V3 的 `CarbonFootprint` 有 11 個必填欄位；Mandate 目前的資料�
 
 ---
 
-## 13. 案件交接摘要（`GET /api/cases`）
+## 13. Supplier vLEI 身分（自建 mock）
+
+`server/fixtures/suppliers.json` 每個供應商可選填 `vlei` 物件，仿造 ISO 17442-3 vLEI 信任鏈（GLEIF → QVI → 法人憑證 → 角色憑證）。沒有 `vlei` 欄位的供應商（如「無證零件行」）維持原本行為，不受影響。
+
+```json
+{
+  "supplierId": "supplier_green_01",
+  "vlei": {
+    "lei": "5299000QINGH0PARTS56",
+    "legalEntityCredential": {
+      "credentialId": "vc_le_green01",
+      "issuer": "qvi_mock_tabei",
+      "status": "ACTIVE",
+      "issuedAt": "2025-01-01T00:00:00+08:00",
+      "expiresAt": "2027-01-01T00:00:00+08:00"
+    },
+    "roleCredentials": [
+      {
+        "credentialId": "vc_ecr_green01_carbon",
+        "type": "ECR",
+        "role": "碳排放申報專員",
+        "issuerCredentialId": "vc_le_green01",
+        "status": "ACTIVE",
+        "issuedAt": "2025-01-01T00:00:00+08:00",
+        "expiresAt": "2027-01-01T00:00:00+08:00"
+      }
+    ]
+  }
+}
+```
+
+- `lei`：20 碼、含正確 ISO 17442-1 MOD 97-10 檢核碼（非隨機字串）。
+- `roleCredentials[].issuerCredentialId` 必須等於 `legalEntityCredential.credentialId`（I2I：Issuer-to-Issuee 指標檢查，`server/vleiCheck.js` 會驗）。
+- 撤銷 `legalEntityCredential` 會連鎖撤銷該供應商自己底下所有 `roleCredentials`（範圍僅限這家供應商的憑證階層，不影響其他供應商）——見 `docs/trust/POLICY_SPEC.md` 的 `POL-CRED-001`。
+- **誠實揭露**：這是自建 mock，仿真 0815 工作坊講者展示的 vLEI 信任鏈行為（見 `記憶.md` 2026-08-17 條目），不接真實 GLEIF／QVI，不能對外宣稱「已串接真實 vLEI 發證機構」。
+
+**回頭修正第 12 節的 `companyIds` 誠實揭露**：有 `vlei.lei` 的供應商，`GET /api/pcf/:supplierId/pact` 現在用真實形狀的 `urn:lei:<20碼>` 取代原本的純佔位字串；沒有 `vlei` 的供應商仍誠實標示 `urn:mandate:supplier:<id>` 佔位字串，不假裝有 LEI。
+
+---
+
+## 14. 案件交接摘要（`GET /api/cases`）
 
 `server/caseSummary.js` 對每個供應商彙整既有的 `session.supplierPipeline`（第 11 節既有欄位）與該供應商的 `AuditEvent.reasoningSummary` 時間軸，組成一份「接手審核前先看這頁」的摘要。**唯讀彙整，不是新實體**：不寫 audit、不呼叫 `policy.evaluate()`、不新增任何 `policyId`，資料來源與 `GET /api/session`／`GET /api/audit` 完全相同，只是換一種排列方式。
 
@@ -538,10 +578,10 @@ PACT V3 的 `CarbonFootprint` 有 11 個必填欄位；Mandate 目前的資料�
 
 ---
 
-## 14. 版本
+## 15. 版本
 
 | 版本 | 日期 | 說明 |
 |------|------|------|
 | V1 | 2026-07-20 | PcfPayload／Staging／CbamDraft／shareRevoked |
 | V1.1 | 2026-07-27 | 新增 PACT V3 格式對齊（`pactMapping.js`），詳見第 12 節 |
-| V1.2 | 2026-08-17 | 新增案件交接摘要唯讀彙整（第 13 節），使用者個人 fork 上的準備期強化，尚未併回 `1qaz0726-star/mandate:main` |
+| V1.2 | 2026-08-17 | 新增 Supplier vLEI 身分（第 13 節）與案件交接摘要唯讀彙整（第 14 節），使用者個人 fork 上的準備期強化，尚未併回 `1qaz0726-star/mandate:main` |

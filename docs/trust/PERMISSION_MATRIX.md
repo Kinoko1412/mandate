@@ -80,13 +80,14 @@ Human 側另有：`revoke_data_share`、（可選）Mandate `revoke`／狀態管
 | toolName | 風險 | Agent | Human | 輸入邊界（摘要） | 主要 policy | V1 |
 |----------|------|-------|-------|------------------|-------------|-----|
 | `request_emissions` | L1 | allow* | allow* | `supplierId` 必填；period 可選 | POL-GATE-002, POL-AUTH-* | Yes |
-| `fetch_supplier_response` | L1 | allow* | allow* | `supplierId` 必填；須先有 request | POL-REQ-001, POL-REV-010 | Yes |
-| `ingest_pcf_payload` | L2 | allow* | allow* | 完整 `PcfPayload`；品質最低欄位 | POL-CARB-001, POL-CARB-002, POL-REV-010 | Yes |
+| `fetch_supplier_response` | L1 | allow* | allow* | `supplierId` 必填；須先有 request | POL-REQ-001, POL-REV-010, POL-CRED-001 | Yes |
+| `ingest_pcf_payload` | L2 | allow* | allow* | 完整 `PcfPayload`；品質最低欄位 | POL-CARB-001, POL-CARB-002, POL-REV-010, POL-CRED-001 | Yes |
 | `export_client_draft` | L2 | deny | allow* | `supplierId`；須有 staging | POL-EXP-001 | Yes |
 | `export_audit` | L2 | deny | allow* | 可選 `format` | POL-EXP-001 | Yes |
 | `submit_cbam_draft` | L3 | **PENDING_HUMAN** | PENDING_HUMAN | `stagingId`／payload 未撤銷；**一律 HITL** | POL-HITL-010, POL-REV-010 | Yes |
 | `commit_cbam_draft` | L4 | **deny（工具未暴露）** | allow（需有效 Approval） | `approvalId` 必填且未消耗 | POL-HITL-010, POL-GATE-000 | Human-only stub |
 | `revoke_data_share` | L3 | deny（預設） | allow（owner／admin／compliance） | `shareId` 或 `stagingId`；`reason` 必填 | POL-REV-010 | Yes |
+| `revoke_supplier_credential` | L3 | deny（預設） | allow（owner／admin／compliance） | `supplierId` 必填；撤銷該供應商法人憑證，連鎖撤銷其下角色憑證 | POL-CRED-001 | Yes（個人 fork 準備期強化，2026-08-17） |
 | `export_sensitive` | L3 | deny | PENDING_HUMAN | `scope` ∈ {audit, staging} | POL-GATE-003 | Optional |
 
 \* `allow*` = 仍須通過 PolicyEngine；不是無條件放行。
