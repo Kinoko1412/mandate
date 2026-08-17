@@ -217,6 +217,7 @@
         <div class="panel-body">
           <div class="btn-row">
             <button type="button" class="btn btn-sm btn-ghost" id="btn-export-audit">匯出</button>
+            <button type="button" class="btn btn-sm btn-ghost" id="btn-case-summary">案件交接摘要</button>
           </div>
           <div class="cloud-audit" id="cloud-audit">
             <div class="cloud-audit-row">
@@ -367,6 +368,23 @@
         </div>
         <div class="check-result" id="check-result" hidden></div>
         </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="case-summary-modal" hidden role="dialog" aria-modal="true" aria-labelledby="case-summary-title">
+    <div class="modal-dialog case-summary-dialog">
+      <div class="modal-head">
+        <div>
+          <h2 id="case-summary-title">案件交接摘要</h2>
+          <p class="modal-sub">依供應商彙整目前狀態與稽核時間軸，方便接手審核</p>
+        </div>
+        <button type="button" class="modal-close" id="case-summary-close" aria-label="關閉">×</button>
+      </div>
+      <div class="modal-body">
+        <ul class="case-list" id="case-summary-list">
+          <li class="feed-empty">載入中…</li>
+        </ul>
+      </div>
     </div>
   </div>
 

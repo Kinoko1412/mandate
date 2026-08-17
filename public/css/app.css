@@ -768,6 +768,87 @@ button {
   display: block;
 }
 
+/* ── Case handoff summary ── */
+.case-summary-dialog {
+  width: min(720px, 100%);
+}
+
+.case-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.case-item {
+  border-bottom: 1px solid var(--line);
+  padding: var(--space-3) 0;
+  cursor: pointer;
+}
+
+.case-item:last-child {
+  border-bottom: none;
+}
+
+.case-item-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.case-item-name {
+  font-weight: 500;
+}
+
+.case-item-sub {
+  margin-top: 3px;
+  font-size: 12px;
+  color: var(--ink-muted);
+}
+
+.case-item-body {
+  margin-top: var(--space-3);
+}
+
+.case-empty {
+  color: var(--ink-faint);
+  font-style: italic;
+  font-size: 12.5px;
+}
+
+.case-timeline {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-left: 2px solid var(--line);
+}
+
+.case-timeline li {
+  padding: var(--space-2) 0 var(--space-2) var(--space-3);
+  margin-left: -1px;
+}
+
+.case-timeline-row1 {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-2);
+  font-size: 11px;
+  color: var(--ink-faint);
+  font-family: "IBM Plex Mono", "Consolas", monospace;
+}
+
+.case-timeline-summary {
+  font-size: 12.5px;
+  margin-top: 2px;
+}
+
+.case-timeline-meta {
+  font-size: 11px;
+  color: var(--ink-muted);
+  font-family: "IBM Plex Mono", "Consolas", monospace;
+  margin-top: 2px;
+}
+
 /* ── Cloud audit (Supabase persistence status) ── */
 .cloud-audit {
   border: 1px solid var(--line);

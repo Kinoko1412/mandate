@@ -519,9 +519,29 @@ PACT V3 的 `CarbonFootprint` 有 11 個必填欄位；Mandate 目前的資料�
 
 ---
 
-## 13. 版本
+## 13. 案件交接摘要（`GET /api/cases`）
+
+`server/caseSummary.js` 對每個供應商彙整既有的 `session.supplierPipeline`（第 11 節既有欄位）與該供應商的 `AuditEvent.reasoningSummary` 時間軸，組成一份「接手審核前先看這頁」的摘要。**唯讀彙整，不是新實體**：不寫 audit、不呼叫 `policy.evaluate()`、不新增任何 `policyId`，資料來源與 `GET /api/session`／`GET /api/audit` 完全相同，只是換一種排列方式。
+
+```json
+{
+  "supplierId": "supplier_green_01",
+  "orgName": "青禾零件股份有限公司",
+  "status": "PENDING_REVIEW",
+  "timeline": [
+    { "ts": "...", "actorType": "AGENT", "toolName": "ingest_pcf_payload", "decision": "ALLOW", "policyId": "POL-ALLOW-000", "reasoningSummary": "品質欄位齊全，已進入暫存區..." }
+  ]
+}
+```
+
+`status` 是純推導欄位（`NEEDS_ATTENTION`／`PENDING_REVIEW`／`REVOKED`／`CLEAR`／`UNTOUCHED`），依既有的 `shareRevoked`／`pendingApproval`／`ingestRejected`／`staged` 訊號決定，不引入新判斷邏輯。
+
+---
+
+## 14. 版本
 
 | 版本 | 日期 | 說明 |
 |------|------|------|
 | V1 | 2026-07-20 | PcfPayload／Staging／CbamDraft／shareRevoked |
 | V1.1 | 2026-07-27 | 新增 PACT V3 格式對齊（`pactMapping.js`），詳見第 12 節 |
+| V1.2 | 2026-08-17 | 新增案件交接摘要唯讀彙整（第 13 節），使用者個人 fork 上的準備期強化，尚未併回 `1qaz0726-star/mandate:main` |

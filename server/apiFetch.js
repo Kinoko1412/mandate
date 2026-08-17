@@ -16,6 +16,7 @@ const { checkPcfPayload, buildSupplementLetter } = require('./pcfCheck');
 const { plainReason } = require('./plainReason');
 const supabaseSync = require('./supabaseSync');
 const pactMapping = require('./pactMapping');
+const caseSummary = require('./caseSummary');
 
 function buildActor(body) {
   const st = store.getState();
@@ -185,6 +186,20 @@ async function handleApiPath(method, pathname, body) {
 
   if (method === 'GET' && pathname === '/api/staging') {
     return { status: 200, body: { staging: store.listStaging() } };
+  }
+
+  if (method === 'GET' && pathname === '/api/cases') {
+    return { status: 200, body: { cases: caseSummary.buildCases() } };
+  }
+
+  const caseMatch = pathname.match(/^\/api\/cases\/([^/]+)$/);
+  if (method === 'GET' && caseMatch) {
+    const supplierId = decodeURIComponent(caseMatch[1]);
+    const found = caseSummary.buildCase(supplierId);
+    if (!found) {
+      return { status: 404, body: { error: 'Case not found', supplierId } };
+    }
+    return { status: 200, body: found };
   }
 
   const pcfMatch = pathname.match(/^\/api\/pcf\/([^/]+)$/);

@@ -38,6 +38,12 @@ import {
   openPolicyGuide,
   handlePolicyGuideEscape,
 } from "./policy-guide.js";
+import {
+  initCaseSummary,
+  openCaseSummary,
+  closeCaseSummary,
+  handleCaseSummaryEscape,
+} from "./case-summary.js";
 
 const API = "/api";
 
@@ -1137,12 +1143,18 @@ function bind() {
   $("supplier-modal")?.addEventListener("click", (ev) => {
     if (ev.target.id === "supplier-modal") closeSupplierModal();
   });
+  $("btn-case-summary")?.addEventListener("click", openCaseSummary);
+  $("case-summary-close")?.addEventListener("click", closeCaseSummary);
+  $("case-summary-modal")?.addEventListener("click", (ev) => {
+    if (ev.target.id === "case-summary-modal") closeCaseSummary();
+  });
   document.addEventListener("keydown", (ev) => {
     if (ev.key === "Escape") {
       if (handlePolicyGuideEscape()) return;
       if (handleOnboardingEscape()) return;
       if (handleResultSheetEscape()) return;
       if (handleTourEscape()) return;
+      if (handleCaseSummaryEscape()) return;
       if (!$("supplier-modal")?.hidden) closeSupplierModal();
     }
   });
@@ -1240,6 +1252,7 @@ initResultSheet({
 });
 initPolicyConsole({ api, setViewDetail });
 initPolicyGuide({ runPreset: runPolicyPreset });
+initCaseSummary({ api });
 initTour({
   setViewDashboard,
   setViewDetail,
