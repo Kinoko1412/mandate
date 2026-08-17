@@ -8,7 +8,7 @@
 評審敘事、評分對齊、六要點話術：`docs/STRATEGY.md`。
 六信任要點的完整規格：`docs/trust/*.md`（`POLICY_SPEC.md`、`PERMISSION_MATRIX.md`、`DATA_MODEL.md`、`GOVERNANCE_GAP_MEMO.md`、`TRUST_ARCHITECTURE.md`、`THREAT_AND_GAPS.md`）。
 
-**不要在未看過 `DECISIONS.md` 第 7 節「V1 刻意不做」之前，建議恢復那些排除項目**（真 CBAM registry、碳權避險、儀表板、多 Agent、讓 LLM 自判權限）——這些是團隊評估過的主動排除，不是遺漏。修改範圍需要「主辦規則衝突」或「隊長明確宣告改題」，且要在 `DECISIONS.md` 留下日期與原因。
+**不要在未看過 `DECISIONS.md` 第 7 節「V1 刻意不做」之前，建議恢復那些排除項目**（真 CBAM registry、碳權避險、儀表板、多 Agent、讓 LLM 自判權限）——這些是團隊評估過的主動排除，不是遺漏。修改範圍需要「主辦規則衝突」或「隊長明確宣告改題」，且要在 `DECISIONS.md` 留下日期與原因。（本分支對「多 Agent」這條有一個已留痕的例外，見下方「本分支對 `DECISIONS.md` §7 的偏離」一節——不是遺漏，是已記錄的個人 fork 實驗。）
 
 ## 不可違反的架構原則
 
@@ -31,6 +31,15 @@
 ## Demo 三幕的 policyId 是穩定契約
 
 `POL-CARB-001`（拒收缺欄位）、`POL-HITL-010`（送審）、`POL-REV-010`（撤銷後拒用）這幾個 ID 會被 Demo 逐字稿、簡報、Governance Gap Memo 交叉引用。改規則邏輯可以，但**不要隨意改這些 ID 字串**，否則文件跟畫面會對不上。
+
+## 本分支對 `DECISIONS.md` §7 的偏離（2026-08-17，僅限本分支）
+
+`feature/trust-enhancements` 分支的「資訊分層」功能（`server/llm.js` 的 `proposeCarbon`／`proposeAuth`）刻意採用**真正的多 Agent**（固定分工、並行發言、同一個 `policy.js` 關卡），偏離 `DECISIONS.md` §7「V1 不做：多 Agent 編排」。
+
+- **決策者**：使用者本人在個人 fork 上的實驗性探索，**不是**隊長對 `1qaz0726-star/mandate:main` 的正式宣告。正式併回 `main` 前，需要跟隊友討論並視結果走 `DECISIONS.md` §9 的正式修訂流程（或維持只留在個人 fork）。
+- **範圍**：**只**偏離「多 Agent 編排」這一條。§7 另一條「讓 LLM 自行決定權限」**完全沒動、仍全面禁止**，且有結構性保證（不是靠 prompt 拜託）：`AuthAgent` 的允許工具集合（`llm.js` 的 `AUTH_ALLOWED_TOOLS`）是空集合，**結構上**不可能提議任何可執行的工具；`CarbonDataAgent` 沿用今天既有的 4 個工具白名單。兩個 Agent 提議的每一個工具呼叫，仍然 100% 經過 `server/policy.js` 唯一放行點才會執行——沒有新的放行路徑，沒有任何一個 Agent 能自己判斷權限。
+- **理由**：使用者認為之後若要降低資訊暴露風險，把不同資訊固定分派給不同 Agent（而非單一 Agent 分次呼叫）架構上更乾淨。
+- **技術細節**：見 `docs/trust/TRUST_ARCHITECTURE.md`「為何這不是多 Agent 編排」一節。
 
 ## 团队协作
 

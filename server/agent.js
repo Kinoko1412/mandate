@@ -7,28 +7,42 @@ const { invokeTool } = require('./toolRuntime');
 
 const DEFAULT_MAX_STEPS = 8;
 
-function buildContext() {
+/**
+ * Fixed-role information split (CarbonDataAgent / AuthAgent) — see
+ * mandate/CLAUDE.md's "本分支對 DECISIONS.md §7 的偏離" note. Each context
+ * builder only exposes the data that agent's role needs; neither can see
+ * the other's domain. This split is program logic, not an LLM decision.
+ */
+function buildCarbonContext() {
   const session = store.getSession();
-  const suppliers = store.listSuppliers();
+  return {
+    orgName: session.org?.displayName,
+    suppliers: store.listSuppliers(),
+    staging: session.staging,
+    emissionsRequests: session.emissionsRequests || [],
+  };
+}
+
+function buildAuthContext() {
+  const session = store.getSession();
   const audit = store.getAudit();
   return {
     orgName: session.org?.displayName,
     mandate: session.mandate,
-    suppliers,
-    staging: session.staging,
-    emissionsRequests: session.emissionsRequests || [],
+    allowedTools: session.mandate?.allowedTools || [],
+    // Deliberately omit inputRedacted.supplierId — AuthAgent explains
+    // authorization/audit outcomes, not which supplier they concerned.
     recentAudit: audit.slice(-8).map((e) => ({
       toolName: e.toolName,
       decision: e.decision,
       policyId: e.policyId,
-      supplierId: e.inputRedacted?.supplierId,
     })),
   };
 }
 
 function buildAgentActor(session) {
   return {
-    actorId: session.agent?.agentId || 'agent_mandate_v1',
+    actorId: 'agent_mandate_carbon_v1',
     actorType: 'AGENT',
     onBehalfOf: session.principal?.principalId,
   };
@@ -49,6 +63,16 @@ async function runAgentTurn({ message, sessionId = 'default', maxSteps = DEFAULT
   }
 
   const history = agentSession.getHistory(sessionId);
+
+  // AuthAgent answers this turn once, in parallel with CarbonDataAgent's
+  // (possibly multi-step) tool-proposal loop below — fixed division of
+  // labor, not dynamic orchestration. It can never propose a tool
+  // (llm.js's AUTH_ALLOWED_TOOLS is the empty set), so it never touches
+  // invokeTool()/policy.js; its only output is supplementary reply text.
+  const authAgentPromise = llm
+    .proposeAuth({ message, history, context: buildAuthContext() })
+    .catch((e) => ({ configured: true, reply: '', error: e.message || String(e) }));
+
   const steps = [];
   let lastReply = '';
   let pendingApproval = null;
@@ -84,10 +108,10 @@ async function runAgentTurn({ message, sessionId = 'default', maxSteps = DEFAULT
   }
 
   for (let i = 0; i < maxSteps; i += 1) {
-    const context = buildContext();
+    const context = buildCarbonContext();
     let proposal;
     try {
-      proposal = await llm.propose({
+      proposal = await llm.proposeCarbon({
         message: i === 0 ? message : overrideMessage || '繼續完成上一個任務（若已完成請 tool=null 並總結）。',
         history: history.concat(
           steps.flatMap((s) => [
@@ -208,6 +232,12 @@ async function runAgentTurn({ message, sessionId = 'default', maxSteps = DEFAULT
     stopReason = 'max_steps';
   }
 
+  const authProposal = await authAgentPromise;
+  const authReply = String(authProposal.reply || '').trim();
+  // Only append AuthAgent's aside when it actually said something — most
+  // turns are carbon-flow requests it has nothing to add to.
+  const authAside = authReply ? `\n\n〔授權與稽核助理〕${authReply}` : '';
+
   const finalReply =
     lastReply +
     (stopReason === 'denied' && steps.length
@@ -215,7 +245,8 @@ async function runAgentTurn({ message, sessionId = 'default', maxSteps = DEFAULT
       : '') +
     (stopReason === 'pending_human'
       ? '\n\n（已暫停：等待合規主管確認才能寫入申報草稿。）'
-      : '');
+      : '') +
+    authAside;
 
   agentSession.appendMessage(sessionId, 'assistant', finalReply);
 
@@ -226,7 +257,7 @@ async function runAgentTurn({ message, sessionId = 'default', maxSteps = DEFAULT
     pendingApproval,
     stopReason,
     executed: steps.some((s) => s.tool),
-    note: '模型只能提議；是否放行由 PolicyEngine 決定。',
+    note: '模型只能提議；是否放行由 PolicyEngine 決定。CarbonDataAgent／AuthAgent 固定分工，皆不能自行放行。',
   };
 }
 

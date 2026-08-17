@@ -144,7 +144,19 @@ flowchart TB
 
 ---
 
-## 6. 文件地圖
+## 6. 為何這不是多 Agent 編排（`feature/trust-enhancements` 分支，2026-08-17）
+
+`server/llm.js` 的 `proposeCarbon()`／`proposeAuth()` 是兩個固定角色的 LLM 呼叫（CarbonDataAgent／AuthAgent），目的是資訊最小化——不同領域的資料只給需要它的那個角色看。這條刻意偏離 `DECISIONS.md` §7「V1 不做：多 Agent 編排」（詳見 `mandate/CLAUDE.md`「本分支對 `DECISIONS.md` §7 的偏離」一節，含決策者、範圍、理由）。以下說明為什麼「LLM 不自行決定權限」這個核心保證沒有被動搖：
+
+1. **分工是程式寫死的，不是動態編排**：`server/agent.js` 的 `runAgentTurn()` 每輪固定呼叫這兩個角色，沒有任何第三個 LLM 在中間決定「這輪該給誰處理」。沒有 orchestrator、沒有 agent-to-agent 協商、沒有動態產生新角色。
+2. **AuthAgent 結構上不可能提議工具**：`llm.js` 的 `AUTH_ALLOWED_TOOLS` 是空集合，`proposeAuth()` 回傳前一律用這個空白名單過濾——即使模型硬要提議工具也會被程式擋掉，不是靠 prompt 拜託。它唯一能做的只有回文字問答。
+3. **CarbonDataAgent 沿用今天既有的白名單**：`CARBON_ALLOWED_TOOLS` 跟改動前的 `ALLOWED_PROPOSE` 完全相同（4 個工具），沒有擴權。
+4. **兩者共用同一個 `server/policy.js` 放行點**：任何一方提議的工具，都要經過 `invokeTool()` → `policy.js` 的六步驟評估才會真正執行；沒有新的放行路徑，也沒有為多 Agent 架構新增任何 policyId 或例外通道。
+5. **已知限制（誠實揭露）**：兩個角色雖然各自只拿到自己領域的**結構化 context**（供應商／staging vs. mandate／稽核摘要），但共用同一份**對話歷史文字**（`agentSession` 的 user/assistant 紀錄）。如果先前對話文字裡提過碳數據細節，AuthAgent 理論上讀得到那段文字——這不是正式的跨 Agent 資訊流控制，只是把「每次呼叫時餵給模型的結構化資料」做了範圍限制。對本 PoC 的示範目的已足夠，但不要對外宣稱這是完整的資訊流隔離。
+
+---
+
+## 7. 文件地圖
 
 | 檔案 | 角色 |
 |------|------|
@@ -157,8 +169,9 @@ flowchart TB
 
 ---
 
-## 7. 版本
+## 8. 版本
 
 | 版本 | 日期 | 說明 |
 |------|------|------|
 | V1 | 2026-07-20 | 碳數據信任閘門契約（由採購閘改題） |
+| V1.1 | 2026-08-17 | 新增第 6 節「為何這不是多 Agent 編排」，個人 fork 準備期強化，尚未併回 `1qaz0726-star/mandate:main` |

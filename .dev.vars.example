@@ -1,2 +1,5 @@
 OPENAI_API_KEY=
 OPENAI_MODEL=gpt-4o-mini
+# Optional: see .env.example for what these do (CarbonDataAgent / AuthAgent model routing)
+# OPENAI_MODEL_CARBON=openai/gpt-4o-mini
+# OPENAI_MODEL_AUTH=openai/gpt-4o-mini
