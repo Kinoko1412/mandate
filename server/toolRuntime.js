@@ -68,6 +68,8 @@ function executeTool(toolName, input) {
       qualityTier: staged && staged.qualityTier,
       warnings: staged && staged.warnings,
       stagedAt: staged && staged.stagedAt,
+      confidenceScore: staged && staged.confidenceScore,
+      confidenceTier: staged && staged.confidenceTier,
       message: 'PCF 已通過品質閘並寫入暫存區。',
     };
   }

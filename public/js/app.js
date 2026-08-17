@@ -71,6 +71,8 @@ const TOOL_LABEL = {
   revoke_supplier_credential: "撤銷供應商法人憑證（vLEI）",
 };
 
+const CONFIDENCE_TIER_LABEL = { high: "信心高", medium: "信心中", low: "信心低" };
+
 const DECISION_LABEL = {
   ALLOW: "通過，可以繼續",
   DENY_REVOKED: "擋下：授權或分享權已失效",
@@ -571,10 +573,15 @@ function renderPending() {
   const supplier = supplierDisplayName(payload.supplierId || "—");
   const t = payload.tCO2e != null ? `${payload.tCO2e} ${payload.unit || "tCO2e"}` : "—";
 
+  const confidenceLine =
+    pending.confidenceScore != null
+      ? `<p class="tech-foot">信心分數（僅供參考，不影響是否需要人審）：${escapeHtml(String(pending.confidenceScore))}／100（${escapeHtml(CONFIDENCE_TIER_LABEL[pending.confidenceTier] || pending.confidenceTier)}）</p>`
+      : "";
   $("pending-body").innerHTML = `
     <p class="pending-plain">AI 想把 <strong>${escapeHtml(supplier)}</strong> 的碳數據（${escapeHtml(String(t))}）寫進申報／客戶回覆草稿。</p>
     <p class="pending-plain">結果：<strong>${escapeHtml(decisionLabel(pending.decision || "PENDING_HUMAN"))}</strong></p>
     <p class="tech-foot">規則 ${escapeHtml(pending.policyId || "POL-HITL-010")} · 單號 ${escapeHtml(id || "—")}</p>
+    ${confidenceLine}
   `;
   panel.classList.add("visible");
 }

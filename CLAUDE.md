@@ -16,6 +16,7 @@
 - **`commit_cbam_draft`（真正寫入 CBAM 草稿）永遠不能被 Agent 呼叫**，只能是人類/後端觸發。這是整個 Demo 論證的核心——一旦讓 Agent 直接呼叫它，HITL（人審）敘事就整個垮了。改動 `server/agent.js`、`server/toolRuntime.js` 時特別注意這條線沒被打破。
 - **V1 刻意零持久化（核心閘門邏輯）**：`server/store.js` 的 `state` 是記憶體變數，資料全來自 `server/fixtures/`，重啟就重置（有 `/api/reset`）。這是刻意設計，不要主動建議加資料庫接管核心邏輯。
   - 例外（2026-07-27 使用者主動要求，非 AI 建議）：`server/supabaseSync.js` 把稽核紀錄／核准紀錄／AI 對話**額外雙寫**進 Supabase（PostgREST fetch，無 SDK），純附加、失敗不影響閘門邏輯，未設 `SUPABASE_URL`/`SUPABASE_SERVICE_KEY` 時完全不啟用。這不算恢復被排除的功能，是強化 Audit Log 這個既有信任要點——但正式上場前建議在 `DECISIONS.md` 補一筆日期與原因，避免評審對照文件時出現矛盾。
+- **信心分數（`server/confidenceScore.js`，2026-08-17 新增）僅供排序／提示 UI 使用，絕不能用於略過 `POL-HITL-010` 或任何 `policy.js` 判斷**。這是純確定性加權的展示層 metadata（`staging`／`GET /api/cases`／pending approval 都會帶這個欄位），`policy.js` 完全不讀它、也不應該讀它。送審與否永遠由 `policy.js` 決定，改動這塊時特別注意不要讓分數影響任何一個 `stepN_*` 函式的判斷。
 
 ## 有兩個執行入口，改動時兩邊都要顧到
 

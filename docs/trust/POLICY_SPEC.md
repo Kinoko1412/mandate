@@ -32,6 +32,8 @@ evaluate(ctx):
 
 **Audit 規則**：終止決策的那一條 `policyId` 必須寫入 `AuditEvent.policyId`。
 
+> **非正式附註（2026-08-17）**：`server/confidenceScore.js` 的信心分數僅供排序／提示 UI 使用，**不是** policy、不影響上述任何一步的判斷，`evaluate()` 完全不讀這個分數。送審與否永遠由步驟 5 的 `POL-HITL-010` 決定。
+
 ---
 
 ## 2. Decision Code 語意

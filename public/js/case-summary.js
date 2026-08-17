@@ -20,8 +20,11 @@ const STATUS_TONE = {
   UNTOUCHED: "tone-neutral",
 };
 
+const CONFIDENCE_TIER_LABEL = { high: "信心高", medium: "信心中", low: "信心低" };
+
 let apiFn = null;
 let cases = [];
+let sortMode = "confidence"; // "confidence" | "recency"
 
 function $(id) {
   return document.getElementById(id);
@@ -54,6 +57,15 @@ function formatTs(ts) {
 
 function initCaseSummary({ api }) {
   apiFn = api;
+  $("btn-case-sort")?.addEventListener("click", () => {
+    sortMode = sortMode === "confidence" ? "recency" : "confidence";
+    const btn = $("btn-case-sort");
+    if (btn) {
+      btn.textContent =
+        sortMode === "confidence" ? "切換排序：依信心分數（低到高）" : "切換排序：依最近異動時間";
+    }
+    renderCaseList();
+  });
 }
 
 function renderTimeline(timeline) {
@@ -75,6 +87,36 @@ function renderTimeline(timeline) {
     .join("")}</ol>`;
 }
 
+function lastTimelineTs(c) {
+  if (!c.timeline || !c.timeline.length) return 0;
+  return Date.parse(c.timeline[c.timeline.length - 1].ts || 0) || 0;
+}
+
+function sortedCases() {
+  const copy = [...cases];
+  if (sortMode === "recency") {
+    return copy.sort((a, b) => lastTimelineTs(b) - lastTimelineTs(a));
+  }
+  // confidence ascending — lowest confidence (needs review most) first;
+  // cases with no score yet (no staged data) sink to the bottom, they're
+  // not "low confidence data", they're just untouched.
+  return copy.sort((a, b) => {
+    const sa = a.confidenceScore == null ? Infinity : a.confidenceScore;
+    const sb = b.confidenceScore == null ? Infinity : b.confidenceScore;
+    if (sa !== sb) return sa - sb;
+    return STATUS_PRIORITY_ORDER.indexOf(a.status) - STATUS_PRIORITY_ORDER.indexOf(b.status);
+  });
+}
+
+const STATUS_PRIORITY_ORDER = ["NEEDS_ATTENTION", "PENDING_REVIEW", "REVOKED", "CLEAR", "UNTOUCHED"];
+
+function confidenceBadge(c) {
+  if (c.confidenceScore == null) return "";
+  const label = CONFIDENCE_TIER_LABEL[c.confidenceTier] || c.confidenceTier;
+  const tone = c.confidenceTier === "high" ? "tone-pass" : c.confidenceTier === "low" ? "tone-deny" : "tone-pending";
+  return `<span class="result-decision-badge ${tone}" title="信心分數僅供參考排序，不影響是否需要人審">${escapeHtml(label)} ${c.confidenceScore}</span>`;
+}
+
 function renderCaseList() {
   const list = $("case-summary-list");
   if (!list) return;
@@ -82,15 +124,15 @@ function renderCaseList() {
     list.innerHTML = '<li class="feed-empty">尚無供應商案件</li>';
     return;
   }
-  list.innerHTML = cases
-    .map((c, idx) => {
+  list.innerHTML = sortedCases()
+    .map((c) => {
       const tone = STATUS_TONE[c.status] || "tone-neutral";
       const label = STATUS_LABEL[c.status] || c.status;
       return `
-      <li class="case-item" data-idx="${idx}">
+      <li class="case-item" data-supplier="${escapeHtml(c.supplierId)}">
         <div class="case-item-head">
           <span class="case-item-name">${escapeHtml(c.orgName || c.supplierId)}</span>
-          <span class="result-decision-badge ${tone}">${escapeHtml(label)}</span>
+          <span class="case-item-badges">${confidenceBadge(c)}<span class="result-decision-badge ${tone}">${escapeHtml(label)}</span></span>
         </div>
         <div class="case-item-sub">
           ${c.pendingApproval ? "有待核准申請 · " : ""}${c.qualityTier ? `品質：${escapeHtml(c.qualityTier)} · ` : ""}${c.timeline.length} 筆紀錄

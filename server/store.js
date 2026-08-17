@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const { session, suppliers, pcfPayloads } = require('./fixtures/bundle');
 const supabaseSync = require('./supabaseSync');
 const { verifySupplierCredentialChain } = require('./vleiCheck');
+const { scoreStagedPayload } = require('./confidenceScore');
 
 function deepClone(obj) {
   return JSON.parse(JSON.stringify(obj));
@@ -82,8 +83,12 @@ function getPcfPayload(supplierId) {
 function stagePayload(payload) {
   if (!payload || !payload.supplierId) return null;
   const { enrichPayloadWithQualityTier } = require('./pcfCheck');
+  const enriched = enrichPayloadWithQualityTier(deepClone(payload));
+  const confidence = scoreStagedPayload(enriched, getSupplier(payload.supplierId), state.audit);
   const entry = {
-    ...enrichPayloadWithQualityTier(deepClone(payload)),
+    ...enriched,
+    confidenceScore: confidence.score,
+    confidenceTier: confidence.tier,
     stagedAt: nowIso(),
   };
   state.staging.set(payload.supplierId, entry);
@@ -199,6 +204,7 @@ function appendAudit(partial) {
 function createApproval({ type, requestedBy, policyId, payload }) {
   state.lastApprovalSeq += 1;
   const approvalId = `appr_${String(state.lastApprovalSeq).padStart(4, '0')}`;
+  const stagedForSupplier = payload && payload.supplierId ? state.staging.get(payload.supplierId) : null;
   const approval = {
     approvalId,
     mandateId: state.mandate.mandateId,
@@ -211,6 +217,8 @@ function createApproval({ type, requestedBy, policyId, payload }) {
     consumedAt: null,
     policyId,
     payload: payload || {},
+    confidenceScore: stagedForSupplier ? stagedForSupplier.confidenceScore : null,
+    confidenceTier: stagedForSupplier ? stagedForSupplier.confidenceTier : null,
   };
   state.approvals.push(approval);
   return approval;

@@ -44,12 +44,18 @@ function buildTimeline(supplierId, auditEvents, limit) {
 function buildCases() {
   const session = store.getSession();
   const auditEvents = store.getAudit();
+  const stagingBySupplier = new Map(session.staging.map((s) => [s.supplierId, s]));
   return session.supplierPipeline
-    .map((p) => ({
-      ...p,
-      status: deriveStatus(p),
-      timeline: buildTimeline(p.supplierId, auditEvents),
-    }))
+    .map((p) => {
+      const staged = stagingBySupplier.get(p.supplierId);
+      return {
+        ...p,
+        status: deriveStatus(p),
+        confidenceScore: staged ? staged.confidenceScore : null,
+        confidenceTier: staged ? staged.confidenceTier : null,
+        timeline: buildTimeline(p.supplierId, auditEvents),
+      };
+    })
     .sort((a, b) => STATUS_PRIORITY[a.status] - STATUS_PRIORITY[b.status]);
 }
 
