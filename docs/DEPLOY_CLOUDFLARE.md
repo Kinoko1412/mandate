@@ -62,10 +62,18 @@ Cloudflare Dashboard → Workers & Pages → mandate → Settings → Domains �
 
 | 項目 | 說明 |
 |------|------|
-| 狀態 | Demo 資料在 Worker **記憶體**，冷啟動或閒置後可能重置 |
+| 狀態 | Demo 資料在單一 Durable Object 實例的**記憶體**（見下方「狀態一致性」），閒置太久被回收或重新部署後會重置 |
 | AI | 未設 `OPENAI_API_KEY` 時仍可用按鈕備援三幕 |
 | 機密 | **勿**把 API Key 寫進 `wrangler.toml`；用 `wrangler secret` |
 | Supabase | 選填、雙寫、失敗不影響 Demo；未設 `SUPABASE_URL`/`SUPABASE_SERVICE_KEY` 時完全不啟用 |
+
+## 狀態一致性（Durable Object，2026-08-18 新增）
+
+`worker/index.js` 的 `/api/*` 路由全部經由一個固定名稱（`"global"`）的 Durable Object 實例（`MandateState` class）處理，`server/store.js`／`server/agentSession.js` 的模組層級記憶體狀態因此只會存在**單一** JS 執行環境裡。
+
+**背景**：純用 `export default { fetch(request, env, ctx) {...} }` 的 Workers 沒有「同一瀏覽器分頁的連續請求會落在同一個 isolate」這種保證——2026-08-18 實測發現：即使是正常人類操作速度（點擊間隔幾秒），也會出現「剛撤銷的供應商憑證，另一個請求卻還看到撤銷前的狀態」這種真實案例，不只是理論上的邊界情況。Durable Object 是 Cloudflare 官方針對這類「需要單一一致記憶體狀態，但不想接外部資料庫」情境的建議做法：`wrangler.toml` 加 `[[durable_objects.bindings]]` + `new_sqlite_classes` migration（**Workers Free 方案已支援**，SQLite 儲存後端不額外收費，見 [2025-04-07 changelog](https://developers.cloudflare.com/changelog/2025-04-07-durable-objects-free-tier/)），純粹拿來當「保證單一執行環境」的容器，**沒有使用** `ctx.storage`，不算違反「V1 刻意零持久化」原則——`state` 該重置的時候（Durable Object 被回收、重新部署）還是會重置，行為跟 `npm start` 的單一 Node process 一致，只是把這個一致性也帶到 Cloudflare Workers 上。
+
+**驗證方式**：連續多輪、每步間隔 2 秒的獨立 curl 呼叫（`request→fetch→revoke→ingest`），修復前偶發不一致，修復後 8/8 輪皆正確。
 
 ## 與本地 `npm start` 差異
 

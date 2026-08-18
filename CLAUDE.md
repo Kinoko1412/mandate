@@ -22,9 +22,13 @@
 
 `server/index.js`（本機 `npm start`，Node 原生 `http`）和 `worker/index.js`（Cloudflare Workers，`wrangler deploy`）**共用同一套邏輯**，都是透過 `server/apiFetch.js` 進去。改 API 行為時，本機測完不代表 Workers 版本沒問題，兩邊入口都要留意。
 
+**Cloudflare 端額外多一層**（2026-08-18 新增）：`worker/index.js` 把全部 `/api/*` 流量轉發進一個固定名稱（`"global"`）的 Durable Object（`MandateState` class），`server/store.js`／`server/agentSession.js` 的模組層級記憶體狀態因此保證落在單一 JS 執行環境。**改 `worker/index.js` 時不要繞過這個轉發**——直接在 `export default { fetch }` 裡呼叫 `handleFetchRequest`（跳過 DO）會讓 isolate 不一致的舊 bug 復發（見下方「已知歷史問題」）。細節與驗證方式見 `docs/DEPLOY_CLOUDFLARE.md`「狀態一致性」一節。
+
 ## 已知歷史問題
 
 `server/agent.js` 第 45-46 行曾經有一個逗號打成分號的語法錯誤，導致 `npm start` 直接 crash（`npm run smoke` 測不到這個路徑，會誤以為沒事）。如果又遇到啟動就 crash，先檢查這類低級語法錯誤，而不是假設是邏輯問題。
+
+**Cloudflare Workers 的 isolate 不一致曾經讓 Policy Engine 判斷本身出錯，不只是展示層（2026-08-18 發現並修好）**：純 stateless `fetch(request, env, ctx)` handler 沒有「同一瀏覽器分頁的連續請求會落在同一個 isolate」的保證——實測發現即使是正常人類操作速度（點擊間隔幾秒），也會出現「剛撤銷的供應商憑證，另一個請求卻還看到撤銷前的狀態」這種真實案例（不只是理論邊界情況）。已用 Durable Object 修好（見上方「有兩個執行入口」段落），8 輪、每步間隔 2 秒的重測全部一致。**如果之後又在 Cloudflare 上看到「明明剛做過的動作，後續請求卻好像沒發生」，先檢查是不是又繞過了 `MandateState` DO 轉發**，而不是假設是新的邏輯 bug。
 
 **「AI 自動演三幕」曾經很容易卡住（2026-07-28 發現並修好）**：`runAgentTurn` 每一步都靠 LLM 自己判斷「這樣算不算做完」再決定要不要繼續呼叫下一個工具——gpt-4o-mini 常常索取/取回完資料就提早回文字總結，不會繼續往下呼叫 `ingest_pcf_payload`／`submit_cbam_draft`，導致單一 Agent 對話卡在第一兩步。實測 4 次一鍵演示只有 1 次完整跑完。已加兩層修正（都在 `runAgentTurn` 內、`policy.js` 完全沒動）：①LLM 過早回 `tool=null` 時，最多給 2 次「繼續完成」的強制提醒才真的收手；②偵測到 LLM 想跳過 `ingest_pcf_payload` 直接呼叫 `submit_cbam_draft`（且該供應商尚未入庫、分享也還沒撤銷）時，攔下來改提醒先做品質檢查。**這只是讓 Demo 順序更穩定的提示工程，不是新的權限判斷**——不管 LLM 提議什麼順序，最終 ALLOW/DENY/PENDING_HUMAN 永遠由 `policy.js` 决定；已用 18 次 API 層級重跑（含撤銷後再申請）驗證過三幕最終判定 100% 正確。
 

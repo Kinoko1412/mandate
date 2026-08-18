@@ -16,6 +16,19 @@ directory = "./public"
 binding = "ASSETS"
 not_found_handling = "single-page-application"
 
+# Durable Object holding the single canonical in-memory state (server/store.js,
+# server/agentSession.js) — see worker/index.js's MandateState class doc comment
+# for why. Free-tier SQLite storage backend; we don't use ctx.storage at all,
+# this exists purely so Cloudflare guarantees one consistent JS execution
+# context for all /api/* requests instead of scattering them across isolates.
+[[durable_objects.bindings]]
+name = "MANDATE_STATE"
+class_name = "MandateState"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["MandateState"]
+
 # All config below is set via `wrangler secret put <NAME>` (see docs/DEPLOY_CLOUDFLARE.md),
 # not [vars] — a [vars] default with the same name as a secret silently overrides the
 # secret on deploy (wrangler warns but still does it), which broke OPENAI_MODEL when it
@@ -24,6 +37,7 @@ not_found_handling = "single-page-application"
 # Secrets:
 #   OPENAI_API_KEY            required for AI Agent
 #   OPENAI_MODEL, OPENAI_BASE_URL   optional (defaults: gpt-4o-mini / api.openai.com)
+#   OPENAI_MODEL_CARBON, OPENAI_MODEL_AUTH   optional, per-role model override (server/llm.js)
 #   SUPABASE_URL, SUPABASE_SERVICE_KEY   optional, enables cloud audit persistence
 
 [observability]
