@@ -182,18 +182,22 @@ export function buildSheetFromTool(toolId, data, ctx = {}) {
 
     case "fetch_supplier_response": {
       const payload = result.payload || body;
+      const denied = decision !== "ALLOW";
       return {
         ...base,
         kind: "reply",
         id: `reply:${supplierId}`,
-        title: "供應商回覆已到",
+        title: denied ? "無法取回供應商回覆" : "供應商回覆已到",
         subtitle: supplierName,
-        rows: buildPcfRows(payload, false),
+        rows: denied ? [] : buildPcfRows(payload, false),
         summary:
+          data.plainReason ||
           result.message ||
-          `已收到 ${supplierName} 的 PCF 回覆（fixture 假資料，模擬廠商寄來）。`,
-        nextStep: "下一步：按 ③ 品質檢查",
-        payload,
+          (denied
+            ? "這次取回被政策擋下。"
+            : `已收到 ${supplierName} 的 PCF 回覆（fixture 假資料，模擬廠商寄來）。`),
+        nextStep: denied ? "" : "下一步：按 ③ 品質檢查",
+        payload: denied ? null : payload,
       };
     }
 
@@ -264,6 +268,22 @@ export function buildSheetFromTool(toolId, data, ctx = {}) {
         ],
         summary: "這家供應商的數據分享權已撤銷。",
         nextStep: "若要再用，須重新索取並取得同意",
+      };
+
+    case "revoke_supplier_credential":
+      return {
+        ...base,
+        kind: "revoke",
+        id: `revoke-vlei:${supplierId}`,
+        title: result.revoked ? "法人憑證已撤銷" : "此供應商無 vLEI 憑證可撤銷",
+        subtitle: supplierName,
+        rows: [
+          row("供應商", supplierName),
+          row("連鎖撤銷角色憑證數", result.cascadedRoles ?? "—"),
+        ],
+        summary: result.message || "已撤銷法人憑證，其下角色憑證同步失效。",
+        nextStep: "在重新取得有效憑證前，這家供應商的碳數據將被拒收（POL-CRED-001）",
+        tone: result.revoked ? "deny" : "neutral",
       };
 
     case "revoke_mandate":
