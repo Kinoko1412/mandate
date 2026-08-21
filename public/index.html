@@ -8,8 +8,10 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="css/tokens.css" />
+  <link rel="stylesheet" href="css/icons.css" />
   <link rel="stylesheet" href="css/app.css" />
   <link rel="stylesheet" href="css/dashboard.css" />
+  <link rel="stylesheet" href="css/suppliers-overview.css" />
   <link rel="stylesheet" href="css/onboarding.css" />
   <link rel="stylesheet" href="css/tour.css" />
   <link rel="stylesheet" href="css/result-sheet.css" />
@@ -18,12 +20,19 @@
 </head>
 <body>
   <div id="error-banner" role="alert"></div>
+  <div class="connectivity-banner" id="connectivity-banner" role="status" hidden>
+    <span class="connectivity-banner-icon" id="connectivity-banner-icon" aria-hidden="true"></span>
+    <span class="connectivity-banner-text">
+      <strong>連線不穩。</strong>部分操作可能延遲，已切換本地暫存，恢復連線後自動同步。
+    </span>
+  </div>
 
   <div class="app">
     <header class="topbar">
       <div class="brand">Mandate</div>
       <nav class="mode-tabs" aria-label="畫面切換">
         <button type="button" class="mode-tab active" id="tab-dashboard">主控版</button>
+        <button type="button" class="mode-tab" id="tab-suppliers">供應商總覽</button>
         <button type="button" class="mode-tab" id="tab-detail">詳細控制</button>
         <button type="button" class="mode-tab" id="tab-policy">政策引擎</button>
         <button type="button" class="mode-tab mode-tab-ghost" id="tab-supplier">供應商自查</button>
@@ -32,23 +41,34 @@
         代表 <strong>艾克美工業・貿易合規</strong> · 合規授權
       </div>
       <div class="help-wrap">
-        <button type="button" class="btn-onboard-help" id="btn-onboard-help" title="說明與導覽" aria-label="說明與導覽">？</button>
-        <div class="help-menu" id="help-menu" hidden>
-          <button type="button" id="help-menu-full-tour">完整介面導覽</button>
-          <button type="button" id="help-menu-tour">三幕 Demo 解說</button>
-          <button type="button" id="help-menu-wizard">用途說明</button>
-          <button type="button" id="help-menu-policy">政策引擎教學</button>
+        <button type="button" class="btn-onboard-help" id="btn-onboard-help" title="說明與導覽" aria-label="說明與導覽" aria-haspopup="menu" aria-expanded="false">？</button>
+        <div class="help-menu" id="help-menu" role="menu" aria-label="說明與導覽選單" hidden>
+          <div class="help-menu-group" role="presentation">新手</div>
+          <button type="button" role="menuitem" id="help-menu-wizard" data-icon="book">用途說明</button>
+          <button type="button" role="menuitem" id="help-menu-full-tour" data-icon="map">完整介面導覽</button>
+          <div class="help-menu-divider" role="separator"></div>
+          <div class="help-menu-group" role="presentation">進階</div>
+          <button type="button" role="menuitem" id="help-menu-tour" data-icon="film">三幕 Demo 解說</button>
+          <button type="button" role="menuitem" id="help-menu-policy" data-icon="gauge">政策引擎教學</button>
+          <div class="help-menu-divider" role="separator"></div>
+          <button type="button" role="menuitem" id="help-menu-tip" data-icon="info">顯示頂部定位說明</button>
+          <button type="button" role="menuitem" id="help-menu-sim-offline" data-icon="wifi-off" aria-pressed="false">模擬離線（測試用）</button>
         </div>
       </div>
+      <button type="button" class="btn-theme-toggle" id="btn-theme-toggle" title="切換深色模式" aria-label="切換深色模式"></button>
       <div class="status-badge" id="mandate-status" data-status="ACTIVE" title="授權狀態">
         <span class="bar" aria-hidden="true"></span>
         <span class="label">授權有效</span>
       </div>
     </header>
 
-    <div class="tip-bar" id="tip-bar">
-      <span>只管數字夠不夠格寫進 CBAM／客戶回覆，不是算碳儀表板。</span>
-      <button type="button" class="tip-dismiss" id="tip-dismiss" aria-label="關閉提示">×</button>
+    <div class="tip-bar" id="tip-bar" role="status">
+      <span class="tip-bar-icon" id="tip-bar-icon" aria-hidden="true"></span>
+      <span class="tip-bar-text">
+        <strong>信任閘門，不是算碳儀表板。</strong>
+        只管數字夠不夠格寫進 CBAM／客戶回覆。
+      </span>
+      <button type="button" class="tip-dismiss" id="tip-dismiss" aria-label="關閉提示（仍可從右上角 ? 選單重新開啟）">×</button>
     </div>
 
     <!-- 主控版 -->
@@ -81,6 +101,7 @@
           <section class="dash-zone dash-actions-row">
             <div class="dash-hero-actions">
               <button type="button" class="btn btn-primary" id="btn-demo">AI 自動演三幕</button>
+              <button type="button" class="btn btn-ghost btn-sm" id="btn-demo-skip" hidden title="不用等動畫／LLM 回應跑完，直接推進到下一步">跳過此步</button>
               <button type="button" class="btn btn-ghost" id="dash-btn-reset-hero">重置 Demo</button>
               <button type="button" class="btn btn-ghost" id="dash-open-supplier">供應商自查</button>
             </div>
@@ -110,6 +131,22 @@
             <p class="feed-empty">尚無紀錄</p>
           </div>
         </aside>
+      </div>
+    </main>
+
+    <!-- 供應商總覽：一頁看所有供應商，依信心分數排序，設計給一天要看上百家供應商的合規人員快速掃過用 -->
+    <main class="suppliers-overview" id="view-suppliers" hidden>
+      <div class="suppliers-overview-head">
+        <div class="suppliers-overview-head-row">
+          <div>
+            <h1>供應商總覽</h1>
+            <p>依信心分數排序，一眼掃過所有供應商目前卡在哪一步</p>
+          </div>
+          <button type="button" class="btn btn-sm btn-ghost" id="btn-suppliers-sort">切換排序：依信心分數（低到高）</button>
+        </div>
+      </div>
+      <div class="suppliers-grid" id="suppliers-grid">
+        <p class="feed-empty">載入中…</p>
       </div>
     </main>
 
@@ -155,11 +192,28 @@
                 <option value="">— 載入中 —</option>
               </select>
             </div>
-            <div class="btn-row">
-              <button type="button" class="btn" id="btn-request">① 索取</button>
-              <button type="button" class="btn" id="btn-fetch">② 取回回覆</button>
-              <button type="button" class="btn" id="btn-ingest">③ 品質檢查</button>
-              <button type="button" class="btn" id="btn-submit">④ 申請寫入</button>
+            <div class="step-row">
+              <button type="button" class="step-btn" id="btn-request">
+                <span class="step-btn-node" id="btn-request-node">1</span>
+                <span class="step-btn-label">索取</span>
+              </button>
+              <button type="button" class="step-btn" id="btn-fetch">
+                <span class="step-btn-node" id="btn-fetch-node">2</span>
+                <span class="step-btn-label">取回回覆</span>
+              </button>
+              <button type="button" class="step-btn" id="btn-ingest">
+                <span class="step-btn-node" id="btn-ingest-node">3</span>
+                <span class="step-btn-label">品質檢查</span>
+              </button>
+              <button type="button" class="step-btn" id="btn-submit">
+                <span class="step-btn-node" id="btn-submit-node">4</span>
+                <span class="step-btn-label">申請寫入</span>
+              </button>
+            </div>
+            <div class="step-error-card" id="step-error-card" role="alert" hidden>
+              <span class="step-error-icon" id="step-error-icon" aria-hidden="true"></span>
+              <span class="step-error-text" id="step-error-text"></span>
+              <button type="button" class="btn btn-ghost btn-sm" id="step-error-retry">重試</button>
             </div>
             <div class="btn-row">
               <button type="button" class="btn btn-danger" id="btn-revoke-share">撤銷分享</button>
@@ -174,7 +228,7 @@
               </div>
             </div>
             <div class="btn-row">
-              <button type="button" class="btn btn-sm btn-ghost" id="btn-pact-preview" title="把上方選取供應商的 PCF 轉成 PACT V3 ProductFootprint 格式預覽（新分頁開啟）">
+              <button type="button" class="btn btn-sm btn-ghost" id="btn-pact-preview" title="把上方選取供應商的 PCF 轉成 PACT V3 ProductFootprint 格式預覽">
                 查看 PACT V3 格式預覽
               </button>
             </div>
@@ -193,11 +247,16 @@
       <section class="panel" id="panel-flow">
         <div class="panel-head">
           <h2>Agent 對話</h2>
+          <button type="button" class="btn btn-sm btn-ghost audit-drawer-toggle" id="btn-audit-drawer-open" aria-haspopup="true" aria-expanded="false">
+            <span id="audit-drawer-icon"></span>
+            查看稽核紀錄
+            <span class="audit-drawer-badge" id="audit-drawer-badge" hidden>0</span>
+          </button>
           <span class="hint">完整紀錄</span>
         </div>
         <div class="panel-body">
           <div class="pending-panel" id="pending-panel" aria-live="polite">
-            <h3>待合規主管確認</h3>
+            <h3 id="pending-heading"></h3>
             <div class="pending-body" id="pending-body"></div>
             <div class="btn-row">
               <button type="button" class="btn btn-primary btn-sm" id="btn-approve">確認寫入草稿</button>
@@ -219,18 +278,20 @@
       <aside class="panel" id="panel-audit">
         <div class="panel-head">
           <h2>稽核紀錄</h2>
+          <button type="button" class="modal-close audit-drawer-toggle" id="btn-audit-drawer-close" aria-label="關閉稽核紀錄">×</button>
           <span class="hint">含 policyId</span>
         </div>
         <div class="panel-body">
           <div class="btn-row">
             <button type="button" class="btn btn-sm btn-ghost" id="btn-export-audit">匯出</button>
-            <button type="button" class="btn btn-sm btn-ghost" id="btn-case-summary">案件交接摘要</button>
+            <button type="button" class="btn btn-sm btn-ghost" id="btn-case-summary">供應商總覽</button>
           </div>
           <div class="cloud-audit" id="cloud-audit">
             <div class="cloud-audit-row">
               <span class="cloud-audit-badge" id="cloud-audit-badge" data-state="loading">☁ 檢查雲端持久化中…</span>
               <button type="button" class="btn btn-sm btn-ghost" id="btn-cloud-audit-refresh">重新驗證</button>
             </div>
+            <div class="hash-chain" id="hash-chain" hidden aria-hidden="true"></div>
             <ul class="cloud-audit-list" id="cloud-audit-list" hidden></ul>
           </div>
           <ul class="audit-list" id="audit-list">
@@ -265,18 +326,16 @@
         <section class="policy-col" id="panel-policy-catalog">
           <div class="policy-col-head">政策目錄（POL-*）</div>
           <div class="policy-col-body">
-            <select class="policy-filter" id="policy-step-filter" aria-label="依評估步驟篩選">
-              <option value="0">全部步驟</option>
-              <option value="1">① 授權狀態</option>
-              <option value="2">② 拒絕清單</option>
-              <option value="3">③ 工具準入</option>
-              <option value="4">④ 資料約束</option>
-              <option value="5">⑤ 人類確認</option>
-              <option value="6">⑥ 全部通過</option>
-            </select>
+            <div class="policy-search-wrap">
+              <span id="policy-search-icon" aria-hidden="true"></span>
+              <input type="text" id="policy-search" placeholder="搜尋規則編號或關鍵字" aria-label="搜尋政策規則" />
+            </div>
+            <div class="policy-chips" id="policy-step-chips" role="group" aria-label="依評估步驟篩選（可多選）"></div>
+            <p class="policy-search-count" id="policy-search-count"></p>
             <ul class="policy-catalog" id="policy-catalog">
               <li class="feed-empty">載入中…</li>
             </ul>
+            <div id="policy-no-result" hidden></div>
             <div class="policy-presets" id="policy-presets"></div>
           </div>
         </section>
@@ -378,23 +437,33 @@
     </div>
   </div>
 
-  <div class="modal-overlay" id="case-summary-modal" hidden role="dialog" aria-modal="true" aria-labelledby="case-summary-title">
-    <div class="modal-dialog case-summary-dialog">
+  <div class="modal-overlay cmdk-overlay" id="cmdk-modal" hidden role="dialog" aria-modal="true" aria-label="指令面板">
+    <div class="modal-dialog cmdk-dialog">
+      <div class="cmdk-input-row">
+        <span class="cmdk-input-icon" id="cmdk-input-icon" aria-hidden="true"></span>
+        <input type="text" id="cmdk-input" class="cmdk-input" placeholder="跳到畫面或供應商…" autocomplete="off" aria-label="指令面板搜尋" />
+        <kbd class="cmdk-esc-hint">Esc</kbd>
+      </div>
+      <ul class="cmdk-list" id="cmdk-list"></ul>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="pact-modal" hidden role="dialog" aria-modal="true" aria-labelledby="pact-modal-title">
+    <div class="modal-dialog pact-dialog">
       <div class="modal-head">
         <div>
-          <h2 id="case-summary-title">案件交接摘要</h2>
-          <p class="modal-sub">依供應商彙整目前狀態與稽核時間軸，方便接手審核</p>
+          <h2 id="pact-modal-title">PACT V3 格式預覽</h2>
+          <p class="modal-sub" id="pact-modal-sub">把選取供應商的 PCF 轉成 PACT Technical Specifications V3 的 ProductFootprint 格式</p>
         </div>
-        <button type="button" class="modal-close" id="case-summary-close" aria-label="關閉">×</button>
+        <button type="button" class="modal-close" id="pact-modal-close" aria-label="關閉">×</button>
       </div>
-      <div class="modal-body">
-        <div class="case-toolbar">
-          <button type="button" class="btn btn-sm btn-ghost" id="btn-case-sort">切換排序：依信心分數（低到高）</button>
-          <span class="case-hint">信心分數僅供參考排序，不影響是否需要人審</span>
+      <div class="modal-body" id="pact-modal-body">
+        <div class="pact-skeleton">
+          <div class="skeleton-line" style="width:60%"></div>
+          <div class="skeleton-line" style="width:90%"></div>
+          <div class="skeleton-line" style="width:80%"></div>
+          <div class="skeleton-line" style="width:70%"></div>
         </div>
-        <ul class="case-list" id="case-summary-list">
-          <li class="feed-empty">載入中…</li>
-        </ul>
       </div>
     </div>
   </div>
@@ -409,7 +478,10 @@
         <button type="button" class="result-sheet-close" id="result-sheet-close" aria-label="關閉">×</button>
       </div>
       <div class="result-sheet-body">
-        <span class="result-decision-badge" id="result-sheet-badge"></span>
+        <div class="result-sheet-status-row">
+          <span id="result-sheet-icon"></span>
+          <span class="result-decision-badge" id="result-sheet-badge"></span>
+        </div>
         <div id="result-sheet-content"></div>
       </div>
       <div class="result-sheet-foot">

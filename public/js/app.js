@@ -38,12 +38,9 @@ import {
   openPolicyGuide,
   handlePolicyGuideEscape,
 } from "./policy-guide.js";
-import {
-  initCaseSummary,
-  openCaseSummary,
-  closeCaseSummary,
-  handleCaseSummaryEscape,
-} from "./case-summary.js";
+import { initSuppliersOverview, refreshSuppliersOverview } from "./suppliers-overview.js";
+import { icon, toneIcon, confidenceGauge, roleAvatar, emptyState } from "./icons.js";
+import { showToast } from "./toast.js";
 
 const API = "/api";
 
@@ -71,6 +68,13 @@ const TOOL_LABEL = {
   revoke_supplier_credential: "撤銷供應商法人憑證（vLEI）",
 };
 
+const TOOL_STEP_BTN = {
+  request_emissions: "btn-request",
+  fetch_supplier_response: "btn-fetch",
+  ingest_pcf_payload: "btn-ingest",
+  submit_cbam_draft: "btn-submit",
+};
+
 const CONFIDENCE_TIER_LABEL = { high: "信心高", medium: "信心中", low: "信心低" };
 
 const DECISION_LABEL = {
@@ -93,6 +97,7 @@ const state = {
   inboxItems: [],
   agentConfigured: false,
   currentView: "dashboard",
+  simulateOffline: false,
 };
 
 function $(id) {
@@ -178,11 +183,39 @@ function showError(msg) {
   el.classList.add("visible");
 }
 
+/**
+ * `state.simulateOffline`（第 11 節「模擬離線」測試開關，`?` 選單可切）讓
+ * 離線橫幅／同步徽章降級／逾時重試卡在沒有真的斷網路的情況下也能被觸發與驗證。
+ */
 async function api(path, opts = {}) {
-  const res = await fetch(`${API}${path}`, {
-    headers: { "Content-Type": "application/json", ...(opts.headers || {}) },
-    ...opts,
-  });
+  if (state.simulateOffline) {
+    await new Promise((r) => setTimeout(r, 350));
+    const err = new Error("網路連線中斷（模擬離線）");
+    err.isOffline = true;
+    throw err;
+  }
+  const controller = new AbortController();
+  const timeoutMs = opts.timeoutMs || 15000;
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  let res;
+  try {
+    res = await fetch(`${API}${path}`, {
+      headers: { "Content-Type": "application/json", ...(opts.headers || {}) },
+      ...opts,
+      signal: controller.signal,
+    });
+  } catch (e) {
+    if (e.name === "AbortError") {
+      const err = new Error("請求逾時，尚未取得回應");
+      err.isTimeout = true;
+      throw err;
+    }
+    const err = new Error("網路連線失敗，請檢查網路");
+    err.isOffline = true;
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
   let data = null;
   const text = await res.text();
   try {
@@ -199,6 +232,29 @@ async function api(path, opts = {}) {
     throw err;
   }
   return data;
+}
+
+function updateConnectivityBanner() {
+  const el = $("connectivity-banner");
+  if (!el) return;
+  el.hidden = !(state.simulateOffline || !navigator.onLine);
+}
+
+function toggleSimulateOffline() {
+  state.simulateOffline = !state.simulateOffline;
+  const btn = $("help-menu-sim-offline");
+  if (btn) {
+    btn.setAttribute("aria-pressed", String(state.simulateOffline));
+    btn.classList.toggle("is-active", state.simulateOffline);
+  }
+  updateConnectivityBanner();
+  if (state.simulateOffline) {
+    setCloudAuditBadge("off", "尚未同步・恢復連線後自動重試");
+    showToast("已開啟離線模擬（測試用）", { type: "neutral" });
+  } else {
+    showToast("已關閉離線模擬", { type: "neutral" });
+    loadCloudAudit();
+  }
 }
 
 function escapeHtml(s) {
@@ -406,7 +462,24 @@ const VLEI_STATUS_LABEL = {
   NO_VLEI: "未使用 vLEI",
 };
 
-function renderVleiPanel() {
+function vleiNode({ label, value, tone, iconName, cascadeDelay }) {
+  const cascadeCls = cascadeDelay != null ? " revoke-cascade" : "";
+  const style = cascadeDelay != null ? ` style="animation-delay:${cascadeDelay}ms"` : "";
+  return `
+    <div class="vlei-node tone-${tone}${cascadeCls}"${style}>
+      <span class="vlei-node-dot">${icon(iconName)}</span>
+      <div class="vlei-node-body">
+        <div class="vlei-node-label">${escapeHtml(label)}</div>
+        <div class="vlei-node-value">${escapeHtml(value)}</div>
+      </div>
+    </div>`;
+}
+
+/**
+ * @param {boolean} justRevoked 剛執行撤銷時傳 true，讓法人憑證＋其下角色憑證
+ *   節點依序（每格約 260ms）由上而下變紅，呼應「連鎖失效」敘事，而不是整條瞬間變色。
+ */
+function renderVleiPanel(justRevoked = false) {
   const panel = $("vlei-panel");
   const chainEl = $("vlei-chain");
   const btn = $("btn-revoke-vlei");
@@ -421,22 +494,40 @@ function renderVleiPanel() {
   const le = supplier.vlei.legalEntityCredential || {};
   const roles = supplier.vlei.roleCredentials || [];
   const statusLabel = VLEI_STATUS_LABEL[supplier.vleiChainStatus] || supplier.vleiChainStatus || "—";
-  const leTone = le.status === "REVOKED" ? "tone-deny" : "tone-pass";
-  const rolesHtml =
-    roles
-      .map((r) => {
-        const tone = r.status === "REVOKED" ? "tone-deny" : "tone-pass";
-        return `<div class="vlei-role-row"><span class="result-decision-badge ${tone}">${escapeHtml(r.role || r.type || "角色憑證")} · ${escapeHtml(r.status || "—")}</span></div>`;
-      })
-      .join("") || '<p class="case-empty">無角色憑證</p>';
+  const leRevoked = le.status === "REVOKED";
+
+  let cascadeStep = 0;
+  const nodes = [
+    vleiNode({
+      label: "發證機構",
+      value: `GLEIF → QVI（${le.issuer || "—"}）`,
+      tone: "pass",
+      iconName: "shield",
+    }),
+    vleiNode({
+      label: "法人憑證",
+      value: le.status || "—",
+      tone: leRevoked ? "deny" : "pass",
+      iconName: leRevoked ? "x" : "check",
+      cascadeDelay: justRevoked && leRevoked ? cascadeStep++ * 260 : null,
+    }),
+    ...roles.map((r) => {
+      const rRevoked = r.status === "REVOKED";
+      return vleiNode({
+        label: r.role || r.type || "角色憑證",
+        value: r.status || "—",
+        tone: rRevoked ? "deny" : "pass",
+        iconName: rRevoked ? "x" : "check",
+        cascadeDelay: justRevoked && rRevoked ? cascadeStep++ * 260 : null,
+      });
+    }),
+  ];
+
   chainEl.innerHTML = `
-    <div class="vlei-chain-row">GLEIF → QVI（${escapeHtml(le.issuer || "—")}）→
-      <span class="result-decision-badge ${leTone}">法人憑證 ${escapeHtml(le.status || "—")}</span>
-    </div>
-    <div class="vlei-roles">${rolesHtml}</div>
+    <div class="vlei-chain-v2">${nodes.join("")}</div>
     <p class="vlei-lei">LEI：${escapeHtml(supplier.vlei.lei || "—")} · 鏈狀態：${escapeHtml(statusLabel)}</p>
   `;
-  if (btn) btn.disabled = le.status === "REVOKED";
+  if (btn) btn.disabled = leRevoked;
 }
 
 async function revokeSupplierCredential() {
@@ -452,7 +543,7 @@ async function revokeSupplierCredential() {
   } catch {
     /* keep stale list on failure */
   }
-  renderVleiPanel();
+  renderVleiPanel(true);
 }
 
 function renderEvents() {
@@ -573,24 +664,63 @@ function renderPending() {
   const supplier = supplierDisplayName(payload.supplierId || "—");
   const t = payload.tCO2e != null ? `${payload.tCO2e} ${payload.unit || "tCO2e"}` : "—";
 
-  const confidenceLine =
+  const confidenceBlock =
     pending.confidenceScore != null
-      ? `<p class="tech-foot">信心分數（僅供參考，不影響是否需要人審）：${escapeHtml(String(pending.confidenceScore))}／100（${escapeHtml(CONFIDENCE_TIER_LABEL[pending.confidenceTier] || pending.confidenceTier)}）</p>`
+      ? `<div class="confidence-row">
+          <span class="conf-dot ${pending.confidenceScore >= 70 ? "high" : "low"}" title="${pending.confidenceScore >= 70 ? "高信心・可直接執行" : "低信心・待人工複核"}"></span>
+          ${confidenceGauge(
+            pending.confidenceScore,
+            pending.confidenceTier,
+            CONFIDENCE_TIER_LABEL[pending.confidenceTier] || pending.confidenceTier
+          )}
+          <p class="tech-foot">信心分數僅供參考排序，不影響是否需要人審——送審與否永遠由政策引擎決定。</p>
+        </div>`
       : "";
+  const heading = $("pending-heading");
+  if (heading) heading.innerHTML = `${icon("robot", "micon-sm")}AI 提議・尚未核准`;
   $("pending-body").innerHTML = `
     <p class="pending-plain">AI 想把 <strong>${escapeHtml(supplier)}</strong> 的碳數據（${escapeHtml(String(t))}）寫進申報／客戶回覆草稿。</p>
     <p class="pending-plain">結果：<strong>${escapeHtml(decisionLabel(pending.decision || "PENDING_HUMAN"))}</strong></p>
     <p class="tech-foot">規則 ${escapeHtml(pending.policyId || "POL-HITL-010")} · 單號 ${escapeHtml(id || "—")}</p>
-    ${confidenceLine}
+    ${confidenceBlock}
   `;
+  panel.classList.remove("human-approved");
   panel.classList.add("visible");
+}
+
+let lastAuditTopKey = null;
+let auditDrawerOpen = false;
+let auditUnreadCount = 0;
+
+function setAuditDrawer(open) {
+  auditDrawerOpen = open;
+  const panel = $("panel-audit");
+  const trigger = $("btn-audit-drawer-open");
+  panel?.classList.toggle("drawer-open", open);
+  trigger?.setAttribute("aria-expanded", String(open));
+  if (open) {
+    auditUnreadCount = 0;
+    updateAuditDrawerBadge();
+  }
+}
+
+function updateAuditDrawerBadge() {
+  const badge = $("audit-drawer-badge");
+  if (!badge) return;
+  badge.hidden = auditUnreadCount === 0;
+  badge.textContent = String(Math.min(auditUnreadCount, 99));
 }
 
 function renderAudit() {
   const ul = $("audit-list");
   const items = state.audit;
   if (!items.length) {
-    ul.innerHTML = '<li class="feed-empty">尚無紀錄</li>';
+    ul.innerHTML = `<li>${emptyState({
+      iconName: "history",
+      headline: "紀錄會在這裡出現",
+      body: "索取數據、核准或撤銷憑證時，每一步都會留下可回溯的紀錄",
+    })}</li>`;
+    lastAuditTopKey = null;
     return;
   }
   ul.innerHTML = "";
@@ -599,15 +729,22 @@ function renderAudit() {
     const tb = Date.parse(b.ts || 0) || 0;
     return tb - ta;
   });
-  for (const ev of sorted) {
+  const topKey = `${sorted[0].ts || ""}:${sorted[0].toolName || ""}`;
+  const isNewTop = topKey !== lastAuditTopKey;
+  if (isNewTop && lastAuditTopKey !== null && !auditDrawerOpen) {
+    auditUnreadCount++;
+    updateAuditDrawerBadge();
+  }
+  lastAuditTopKey = topKey;
+  sorted.forEach((ev, i) => {
     const li = document.createElement("li");
-    li.className = "audit-item";
+    li.className = i === 0 && isNewTop ? "audit-item anim-flash" : "audit-item";
     const decision = ev.decision || "—";
     const policyId = ev.policyId || "—";
     const tool = ev.toolName || "—";
     li.innerHTML = `
       <div class="row1"><span>${escapeHtml(formatTs(ev.ts))}</span></div>
-      <div class="audit-plain">${escapeHtml(displayReason({ decision, policyId, reason: ev.reason, plainReason: ev.plainReason }, policyId, ev.reason || ""))}</div>
+      <div class="audit-plain">${roleAvatar(ev.actorType)}${escapeHtml(displayReason({ decision, policyId, reason: ev.reason, plainReason: ev.plainReason }, policyId, ev.reason || ""))}</div>
       <div class="row2">
         <span class="tool">${escapeHtml(toolLabel(tool))}</span>
         <span class="dec">${escapeHtml(decisionLabel(decision))}</span>
@@ -616,7 +753,7 @@ function renderAudit() {
     `;
     li.addEventListener("click", () => li.classList.toggle("open"));
     ul.appendChild(li);
-  }
+  });
 }
 
 function normalizeList(data, ...keys) {
@@ -691,8 +828,35 @@ async function manualIngest() {
   await callTool("ingest_pcf_payload", payload);
 }
 
+function showStepError(toolId, bodyOverride, err) {
+  const card = $("step-error-card");
+  const text = $("step-error-text");
+  if (!card || !text) return;
+  text.textContent = err.isTimeout
+    ? "請求逾時，尚未取得供應商回覆。"
+    : "網路連線中斷，這個動作尚未送出。";
+  card.hidden = false;
+  const btnId = TOOL_STEP_BTN[toolId];
+  if (btnId) $(`${btnId}-node`)?.classList.add("node-error");
+  const retryBtn = $("step-error-retry");
+  if (retryBtn) {
+    retryBtn.onclick = () => {
+      card.hidden = true;
+      if (btnId) $(`${btnId}-node`)?.classList.remove("node-error");
+      callTool(toolId, bodyOverride);
+    };
+  }
+}
+
+function clearStepError() {
+  const card = $("step-error-card");
+  if (card) card.hidden = true;
+  Object.values(TOOL_STEP_BTN).forEach((btnId) => $(`${btnId}-node`)?.classList.remove("node-error"));
+}
+
 async function callTool(toolId, bodyOverride) {
   showError("");
+  clearStepError();
   try {
     let body = bodyOverride;
     if (!body) {
@@ -730,10 +894,26 @@ async function callTool(toolId, bodyOverride) {
       }
     }
 
-    const data = await api(`/tools/${toolId}`, {
-      method: "POST",
-      body: JSON.stringify(body),
-    });
+    const btnId = TOOL_STEP_BTN[toolId];
+    const btnEl = btnId ? $(btnId) : null;
+    const nodeEl = btnId ? $(`${btnId}-node`) : null;
+    const prevNodeHtml = nodeEl ? nodeEl.innerHTML : null;
+    if (btnEl && nodeEl) {
+      btnEl.classList.add("is-loading");
+      nodeEl.innerHTML = icon("hourglass", "micon-sm micon-spin");
+    }
+    let data;
+    try {
+      data = await api(`/tools/${toolId}`, {
+        method: "POST",
+        body: JSON.stringify(body),
+      });
+    } finally {
+      if (btnEl && nodeEl) {
+        btnEl.classList.remove("is-loading");
+        nodeEl.innerHTML = prevNodeHtml;
+      }
+    }
     if (toolId === "fetch_supplier_response" && data.result?.payload) {
       const sid = body.supplierId || selectedSupplierId();
       state.lastFetchedPayload[sid] = data.result.payload;
@@ -770,6 +950,10 @@ async function callTool(toolId, bodyOverride) {
       dashboardRender();
       afterTool(toolId, data, bodyOverride);
       return data;
+    }
+    if (e.isTimeout || e.isOffline) {
+      showStepError(toolId, bodyOverride, e);
+      return;
     }
     showError(`${toolLabel(toolId)} 失敗：${e.message}`);
   }
@@ -895,6 +1079,18 @@ async function decideApproval(action) {
     if (action === "approve" && exportBtn) {
       exportBtn.hidden = false;
     }
+    if (action === "approve") {
+      // 虛線紫（AI 提議）→ 實線綠（人類已核准）短暫停留，讓「拍板」這個
+      // 動作本身可見，再讓正常的 softRefresh 依狀態把面板收起。
+      const panel = $("pending-panel");
+      const heading = $("pending-heading");
+      const principalName = state.session?.principal?.displayName || "合規人員";
+      if (panel && heading) {
+        panel.classList.add("human-approved");
+        heading.innerHTML = `${icon("user-check", "micon-sm")}HUMAN 已核准・${escapeHtml(principalName)}`;
+      }
+      await new Promise((r) => setTimeout(r, 700));
+    }
     await softRefresh();
   } catch (e) {
     showError(`核准操作失敗：${e.message}`);
@@ -905,10 +1101,45 @@ function appendChat(role, text) {
   const log = $("chat-log");
   if (!log) return;
   const div = document.createElement("div");
-  div.className = `chat-bubble ${role}`;
+  div.className = `chat-bubble ${role} anim-pop-in`;
   div.textContent = text;
   log.appendChild(div);
   log.scrollTop = log.scrollHeight;
+  return div;
+}
+
+/** 逾時／離線時取代一般 AI 回覆泡泡：講清楚發生什麼事＋原地重試按鈕（第 11 節）。 */
+function appendChatError(text, originalMessage) {
+  const log = $("chat-log");
+  if (!log) return;
+  const div = document.createElement("div");
+  div.className = "chat-bubble assistant chat-error anim-pop-in";
+  const span = document.createElement("span");
+  span.textContent = text;
+  const retry = document.createElement("button");
+  retry.type = "button";
+  retry.className = "btn btn-ghost btn-sm chat-retry-btn";
+  retry.textContent = "重試";
+  retry.addEventListener("click", () => {
+    div.remove();
+    sendChatMessage(originalMessage);
+  });
+  div.appendChild(span);
+  div.appendChild(retry);
+  log.appendChild(div);
+  log.scrollTop = log.scrollHeight;
+}
+
+function appendThinking() {
+  const log = $("chat-log");
+  if (!log) return null;
+  const div = document.createElement("div");
+  div.className = "chat-bubble assistant chat-thinking";
+  div.innerHTML =
+    '<span class="skeleton-line" style="width:120px;display:inline-block"></span>';
+  log.appendChild(div);
+  log.scrollTop = log.scrollHeight;
+  return div;
 }
 
 async function refreshAgentStatus() {
@@ -945,23 +1176,30 @@ async function sendDashChat() {
 
 async function sendChat() {
   const input = $("chat-input");
-  const btn = $("btn-chat-send");
-  const dashBtn = $("dash-chat-send");
   const message = (input?.value || "").trim();
   if (!message) return;
+  input.value = "";
+  await sendChatMessage(message);
+}
+
+async function sendChatMessage(message) {
+  const btn = $("btn-chat-send");
+  const dashBtn = $("dash-chat-send");
   showError("");
   appendChat("user", message);
-  input.value = "";
   if (btn) btn.disabled = true;
   if (dashBtn) {
     dashBtn.disabled = true;
     dashBtn.textContent = "處理中…";
   }
+  const thinking = appendThinking();
   try {
     const data = await api("/agent/chat", {
       method: "POST",
       body: JSON.stringify({ message, maxSteps: 8 }),
+      timeoutMs: 45000,
     });
+    thinking?.remove();
     if (!data.configured) {
       showError(data.reply || "未設定 API Key");
       appendChat("assistant", data.reply || "未設定 API Key");
@@ -974,9 +1212,17 @@ async function sendChat() {
     appendChat("assistant", reply);
     await softRefresh();
   } catch (e) {
-    const detail = e.data?.detail || e.message;
-    appendChat("assistant", `呼叫失敗：${detail}`);
-    showError(`AI 對話失敗：${detail}`);
+    thinking?.remove();
+    if (e.isTimeout || e.isOffline) {
+      appendChatError(
+        e.isTimeout ? "AI 沒有回應，可能是網路問題。" : "網路連線中斷，訊息尚未送出。",
+        message
+      );
+    } else {
+      const detail = e.data?.detail || e.message;
+      appendChat("assistant", `呼叫失敗：${detail}`);
+      showError(`AI 對話失敗：${detail}`);
+    }
   } finally {
     if (btn) btn.disabled = false;
     if (dashBtn) {
@@ -1001,18 +1247,24 @@ function setView(view) {
   const dash = view === "dashboard";
   const policy = view === "policy";
   const detail = view === "detail";
+  const suppliers = view === "suppliers";
   $("view-dashboard").hidden = !dash;
   $("view-detail").hidden = !detail;
   $("view-policy").hidden = !policy;
+  $("view-suppliers").hidden = !suppliers;
   $("tab-dashboard")?.classList.toggle("active", dash);
   $("tab-detail")?.classList.toggle("active", detail);
   $("tab-policy")?.classList.toggle("active", policy);
+  $("tab-suppliers")?.classList.toggle("active", suppliers);
   if (policy) {
     setViewPolicy();
     maybeAutoOpenPolicyGuide();
   }
   if (detail) {
     loadCloudAudit();
+  }
+  if (suppliers) {
+    refreshSuppliersOverview();
   }
 }
 
@@ -1028,6 +1280,10 @@ function setViewPolicyTab() {
   setView("policy");
 }
 
+function setViewSuppliers() {
+  setView("suppliers");
+}
+
 function openSupplierModal() {
   const modal = $("supplier-modal");
   if (!modal) return;
@@ -1038,6 +1294,97 @@ function openSupplierModal() {
 
 function closeSupplierModal() {
   const modal = $("supplier-modal");
+  if (!modal) return;
+  modal.hidden = true;
+  document.body.classList.remove("modal-open");
+}
+
+/* ── PACT V3 預覽：改成站內排版表格，取代原本直接開新分頁看原始 JSON（問題 3） ── */
+const PACT_FIELD_LABELS = {
+  companyName: "供應商名稱",
+  companyIds: "供應商識別碼（LEI／URN）",
+  productDescription: "產品描述",
+  productClassifications: "產品分類（CN 碼）",
+  declaredUnitOfMeasurement: "宣告單位",
+  declaredUnitAmount: "宣告單位數量",
+  productMassPerDeclaredUnit: "每宣告單位產品質量",
+  referencePeriodStart: "報告期間起",
+  referencePeriodEnd: "報告期間迄",
+  pcfExcludingBiogenicUptake: "排放量（不含生質碳吸收）",
+  pcfIncludingBiogenicUptake: "排放量（含生質碳吸收）",
+  fossilGhgEmissions: "化石燃料溫室氣體排放",
+  fossilCarbonContent: "化石碳含量",
+  ipccCharacterizationFactors: "IPCC 特性化係數版本",
+  crossSectoralStandards: "採用計算標準",
+  exemptedEmissionsPercent: "排除排放百分比",
+};
+
+function pactValueText(v) {
+  if (v == null) return "—";
+  if (Array.isArray(v)) return v.length ? v.join("、") : "—";
+  return String(v);
+}
+
+function renderPactTable(data, supplierName) {
+  const pf = data.productFootprint || {};
+  const pcf = pf.pcf || {};
+  const gaps = data.pactGaps || [];
+  const gapFor = (key) => gaps.find((g) => (g.field || "").includes(key));
+
+  const rows = [...Object.keys(PACT_FIELD_LABELS)]
+    .map((key) => (key in pcf ? ["pcf", key] : key in pf ? ["pf", key] : null))
+    .filter(Boolean);
+  const gapRowCount = rows.filter(([, key]) => gapFor(key)).length;
+
+  const rowsHtml = rows
+    .map(([bucket, key]) => {
+      const value = bucket === "pcf" ? pcf[key] : pf[key];
+      const gap = gapFor(key);
+      const statusHtml = gap
+        ? `<span class="pact-field-status gap">${icon("x", "micon-sm")}缺漏</span>`
+        : `<span class="pact-field-status ok">${icon("check", "micon-sm")}已對應</span>`;
+      return `
+        <tr>
+          <th>${escapeHtml(PACT_FIELD_LABELS[key])}<br>${statusHtml}</th>
+          <td>
+            ${escapeHtml(pactValueText(value))}
+            ${gap ? `<p class="pact-gap-reason">${escapeHtml(gap.reason)}</p>` : ""}
+          </td>
+        </tr>`;
+    })
+    .join("");
+
+  return `
+    <p class="pact-meta">${escapeHtml(data.note || "")}</p>
+    <table class="pact-table"><tbody>${rowsHtml}</tbody></table>
+    <p class="pact-meta">已對應 ${rows.length - gapRowCount}／${rows.length} 個 PACT 欄位（${escapeHtml(supplierName)}）。「缺漏」欄位如實揭露原因，不用預設值假裝有數據。</p>
+  `;
+}
+
+async function openPactPreview(supplierId) {
+  const modal = $("pact-modal");
+  const body = $("pact-modal-body");
+  if (!modal || !body) return;
+  modal.hidden = false;
+  document.body.classList.add("modal-open");
+  body.innerHTML = `
+    <div class="pact-skeleton">
+      <div class="skeleton-line" style="width:60%"></div>
+      <div class="skeleton-line" style="width:90%"></div>
+      <div class="skeleton-line" style="width:80%"></div>
+      <div class="skeleton-line" style="width:70%"></div>
+    </div>`;
+  const supplierName = supplierDisplayName(supplierId);
+  try {
+    const data = await api(`/pcf/${encodeURIComponent(supplierId)}/pact`);
+    body.innerHTML = renderPactTable(data, supplierName);
+  } catch (e) {
+    body.innerHTML = `<p class="result-summary">${toneIcon("deny", "sm")} 無法載入 PACT V3 預覽：${escapeHtml(e.message)}（通常代表這家供應商還沒通過品質檢查入庫）</p>`;
+  }
+}
+
+function closePactPreview() {
+  const modal = $("pact-modal");
   if (!modal) return;
   modal.hidden = true;
   document.body.classList.remove("modal-open");
@@ -1111,13 +1458,13 @@ async function exportClientDraft() {
     const text = data.result?.content || data.content || "";
     if (text && navigator.clipboard) {
       await navigator.clipboard.writeText(text);
-      showError("");
+      showToast("已複製給客戶回覆草稿", { type: "success" });
       appendChat("assistant", "已複製「給客戶的回覆草稿」到剪貼簿。");
     } else {
       window.prompt("給客戶的回覆草稿", text);
     }
   } catch (e) {
-    showError(`匯出失敗：${e.message}`);
+    showToast(`匯出失敗：${e.message}`, { type: "danger" });
   }
 }
 
@@ -1127,31 +1474,68 @@ function setCloudAuditBadge(state, text) {
   const badge = $("cloud-audit-badge");
   if (!badge) return;
   badge.dataset.state = state;
-  badge.textContent = text;
+  const prefix =
+    state === "loading"
+      ? '<span class="pulse-dot" aria-hidden="true"></span>'
+      : state === "ok"
+        ? icon("check", "micon-sm")
+        : state === "broken" || state === "error"
+          ? icon("alert", "micon-sm")
+          : icon("link", "micon-sm");
+  badge.innerHTML = `${prefix}${escapeHtml(text)}`;
+}
+
+/**
+ * 稽核雜湊鏈視覺化：跟 vLEI 信任鏈同一套「節點＋連接線，斷裂變色」語言。
+ * API 只回傳「幾筆對不上」（brokenCount），不會逐筆標記哪幾筆——所以這裡
+ * 用「從尾端往回數 brokenCount 筆」畫出斷裂範圍，是示意近似值而非逐筆
+ * 精確位置，但足以呈現「雜湊鏈哪裡開始斷、後面全部遭殃」這個概念。
+ */
+function renderHashChain(count, brokenCount, chainIntact) {
+  const wrap = $("hash-chain");
+  if (!wrap) return;
+  if (!count) {
+    wrap.hidden = true;
+    wrap.innerHTML = "";
+    return;
+  }
+  const n = Math.min(count, 12);
+  const brokenFrom = chainIntact ? Infinity : Math.max(0, n - Math.min(brokenCount, n));
+  let html = "";
+  for (let i = 0; i < n; i++) {
+    const broken = i >= brokenFrom;
+    html += `<span class="hash-link${broken ? " broken" : ""}"></span>`;
+    if (i < n - 1) html += `<span class="hash-line${broken ? " broken" : ""}"></span>`;
+  }
+  wrap.innerHTML = html;
+  wrap.hidden = false;
 }
 
 async function loadCloudAudit() {
   const list = $("cloud-audit-list");
-  setCloudAuditBadge("loading", "☁ 檢查雲端持久化中…");
+  setCloudAuditBadge("loading", "檢查雲端持久化中…");
   try {
     const data = await api("/audit/cloud");
     if (!data.configured) {
-      setCloudAuditBadge("off", "☁ 未接 Supabase（僅本機記憶體，重啟即消失）");
+      setCloudAuditBadge("off", "未接 Supabase（僅本機記憶體，重啟即消失）");
       if (list) list.hidden = true;
+      renderHashChain(0);
       return;
     }
     if (data.error) {
-      setCloudAuditBadge("error", `☁ 讀取失敗：${data.error}`);
+      setCloudAuditBadge("error", `讀取失敗：${data.error}`);
       if (list) list.hidden = true;
+      renderHashChain(0);
       return;
     }
     const chainText = data.chainIntact
       ? `雜湊鏈完整`
-      : `⚠ 雜湊鏈異常（${data.brokenCount} 筆對不上，可能被竄改）`;
+      : `雜湊鏈異常（${data.brokenCount} 筆對不上，可能被竄改）`;
     setCloudAuditBadge(
       data.chainIntact ? "ok" : "broken",
-      `☁ 已同步 Supabase・${data.count} 筆・${chainText}`
+      `已同步 Supabase・${data.count} 筆・${chainText}`
     );
+    renderHashChain(data.count, data.brokenCount, data.chainIntact);
     if (list) {
       list.innerHTML = (data.events || [])
         .map((ev) => {
@@ -1166,9 +1550,25 @@ async function loadCloudAudit() {
       list.hidden = !cloudAuditListOpen;
     }
   } catch (e) {
-    setCloudAuditBadge("error", `☁ 讀取失敗：${e.message}`);
+    if (e.isOffline || e.isTimeout) {
+      setCloudAuditBadge("off", "尚未同步・恢復連線後自動重試");
+      scheduleCloudAuditRetry();
+    } else {
+      setCloudAuditBadge("error", `讀取失敗：${e.message}`);
+    }
     if (list) list.hidden = true;
+    renderHashChain(0);
   }
+}
+
+let cloudAuditRetryTimer = null;
+
+function scheduleCloudAuditRetry() {
+  if (cloudAuditRetryTimer) return;
+  cloudAuditRetryTimer = setTimeout(() => {
+    cloudAuditRetryTimer = null;
+    loadCloudAudit();
+  }, 8000);
 }
 
 async function exportAuditLog() {
@@ -1177,13 +1577,140 @@ async function exportAuditLog() {
     const text = data.result?.content || data.content || "";
     if (text && navigator.clipboard) {
       await navigator.clipboard.writeText(text);
-      showError("");
+      showToast("已匯出稽核紀錄", { type: "success" });
     } else {
       window.prompt("稽核紀錄", text);
     }
   } catch (e) {
-    showError(`匯出失敗：${e.message}`);
+    showToast(`匯出失敗：${e.message}`, { type: "danger" });
   }
+}
+
+/**
+ * 指令面板 ⌘/Ctrl+K（第 20 節）：快速跳到任一畫面或供應商，進階使用者導向，
+ * 不影響第一次使用的人（不用快捷鍵一樣能點選單／下拉操作）。
+ */
+const CMDK_STATIC_ITEMS = [
+  { id: "view-dashboard", label: "前往主控版", iconName: "map", action: () => setViewDashboard() },
+  { id: "view-detail", label: "前往詳細控制", iconName: "tool", action: () => setViewDetail() },
+  { id: "view-policy", label: "前往政策引擎", iconName: "gauge", action: () => setViewPolicyTab() },
+  { id: "supplier-check", label: "供應商自查", iconName: "search", action: () => openSupplierModal() },
+  { id: "suppliers-overview", label: "供應商總覽", iconName: "users", action: () => setViewSuppliers() },
+];
+
+let cmdkItems = [];
+let cmdkActiveIndex = 0;
+
+function jumpToSupplier(supplierId) {
+  setViewDetail();
+  const sel = $("supplier-select");
+  if (sel) {
+    sel.value = supplierId;
+    sel.dispatchEvent(new Event("change"));
+  }
+}
+
+function cmdkSupplierItems() {
+  return state.suppliers
+    .filter((s) => (s.supplierId || s.id) !== "supplier_blocked_99")
+    .map((s) => {
+      const id = s.supplierId || s.id;
+      const name = s.orgName || s.displayName || id;
+      return {
+        id: `supplier:${id}`,
+        label: name,
+        sub: "供應商",
+        iconName: "users",
+        action: () => jumpToSupplier(id),
+      };
+    });
+}
+
+function cmdkFilter(query) {
+  const all = [...CMDK_STATIC_ITEMS, ...cmdkSupplierItems()];
+  const q = query.trim().toLowerCase();
+  if (!q) return all;
+  return all.filter((it) => it.label.toLowerCase().includes(q));
+}
+
+function renderCmdkList() {
+  const list = $("cmdk-list");
+  if (!list) return;
+  if (!cmdkItems.length) {
+    list.innerHTML = '<li class="cmdk-empty">找不到符合的畫面或供應商</li>';
+    return;
+  }
+  list.innerHTML = cmdkItems
+    .map(
+      (it, idx) => `
+      <li class="cmdk-item${idx === cmdkActiveIndex ? " active" : ""}" data-idx="${idx}">
+        ${icon(it.iconName, "micon-sm")}<span>${escapeHtml(it.label)}</span>${it.sub ? `<span class="cmdk-item-sub">${escapeHtml(it.sub)}</span>` : ""}
+      </li>`
+    )
+    .join("");
+}
+
+function cmdkRunActive() {
+  const it = cmdkItems[cmdkActiveIndex];
+  if (!it) return;
+  closeCmdk();
+  it.action();
+}
+
+function openCmdk() {
+  const modal = $("cmdk-modal");
+  const input = $("cmdk-input");
+  if (!modal || !input) return;
+  modal.hidden = false;
+  document.body.classList.add("modal-open");
+  input.value = "";
+  cmdkActiveIndex = 0;
+  cmdkItems = cmdkFilter("");
+  renderCmdkList();
+  setTimeout(() => input.focus(), 0);
+}
+
+function closeCmdk() {
+  const modal = $("cmdk-modal");
+  if (!modal) return;
+  modal.hidden = true;
+  document.body.classList.remove("modal-open");
+}
+
+function isCmdkOpen() {
+  return !$("cmdk-modal")?.hidden;
+}
+
+function bindCmdk() {
+  const input = $("cmdk-input");
+  input?.addEventListener("input", () => {
+    cmdkActiveIndex = 0;
+    cmdkItems = cmdkFilter(input.value);
+    renderCmdkList();
+  });
+  input?.addEventListener("keydown", (ev) => {
+    if (ev.key === "ArrowDown") {
+      ev.preventDefault();
+      cmdkActiveIndex = Math.min(cmdkActiveIndex + 1, cmdkItems.length - 1);
+      renderCmdkList();
+    } else if (ev.key === "ArrowUp") {
+      ev.preventDefault();
+      cmdkActiveIndex = Math.max(cmdkActiveIndex - 1, 0);
+      renderCmdkList();
+    } else if (ev.key === "Enter") {
+      ev.preventDefault();
+      cmdkRunActive();
+    }
+  });
+  $("cmdk-list")?.addEventListener("click", (ev) => {
+    const li = ev.target.closest(".cmdk-item");
+    if (!li) return;
+    cmdkActiveIndex = Number(li.dataset.idx);
+    cmdkRunActive();
+  });
+  $("cmdk-modal")?.addEventListener("click", (ev) => {
+    if (ev.target.id === "cmdk-modal") closeCmdk();
+  });
 }
 
 function bind() {
@@ -1203,6 +1730,15 @@ function bind() {
       onDemoTour: () => startTour({ force: true }),
       onWizard: () => openOnboarding(),
       onPolicyGuide: () => openPolicyGuide(),
+      onShowTip: () => {
+        const bar = $("tip-bar");
+        if (!bar) return;
+        bar.hidden = false;
+        bar.classList.remove("anim-banner-in");
+        void bar.offsetWidth;
+        bar.classList.add("anim-banner-in");
+      },
+      onSimOffline: toggleSimulateOffline,
     });
   });
   $("supplier-modal-close")?.addEventListener("click", closeSupplierModal);
@@ -1210,19 +1746,74 @@ function bind() {
   $("supplier-modal")?.addEventListener("click", (ev) => {
     if (ev.target.id === "supplier-modal") closeSupplierModal();
   });
-  $("btn-case-summary")?.addEventListener("click", openCaseSummary);
-  $("case-summary-close")?.addEventListener("click", closeCaseSummary);
-  $("case-summary-modal")?.addEventListener("click", (ev) => {
-    if (ev.target.id === "case-summary-modal") closeCaseSummary();
-  });
+  $("btn-audit-drawer-open")?.addEventListener("click", () => setAuditDrawer(!auditDrawerOpen));
+  $("btn-audit-drawer-close")?.addEventListener("click", () => setAuditDrawer(false));
+  $("tab-suppliers")?.addEventListener("click", setViewSuppliers);
+  $("btn-case-summary")?.addEventListener("click", setViewSuppliers);
   document.addEventListener("keydown", (ev) => {
     if (ev.key === "Escape") {
+      if (isCmdkOpen()) {
+        closeCmdk();
+        return;
+      }
       if (handlePolicyGuideEscape()) return;
       if (handleOnboardingEscape()) return;
       if (handleResultSheetEscape()) return;
       if (handleTourEscape()) return;
-      if (handleCaseSummaryEscape()) return;
+      if (!$("pact-modal")?.hidden) {
+        closePactPreview();
+        return;
+      }
+      if (auditDrawerOpen) {
+        setAuditDrawer(false);
+        return;
+      }
       if (!$("supplier-modal")?.hidden) closeSupplierModal();
+    }
+  });
+  document.addEventListener("keydown", (ev) => {
+    const target = ev.target;
+    const typing =
+      target instanceof HTMLElement &&
+      (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable);
+
+    // ⌘/Ctrl+Enter：主管核准卡片開啟時直接核准（不管有沒有在打字）
+    if ((ev.metaKey || ev.ctrlKey) && ev.key === "Enter") {
+      const panel = $("pending-panel");
+      if (panel && panel.classList.contains("visible")) {
+        ev.preventDefault();
+        decideApproval("approve");
+      }
+      return;
+    }
+
+    // ⌘/Ctrl+K：開啟指令面板（不管有沒有在打字，跟一般指令面板慣例一致）
+    if ((ev.metaKey || ev.ctrlKey) && ev.key.toLowerCase() === "k") {
+      ev.preventDefault();
+      openCmdk();
+      return;
+    }
+
+    if (typing) return;
+
+    // 1～4：跳到詳細控制的對應步驟按鈕（只在詳細控制頁有意義）
+    if (["1", "2", "3", "4"].includes(ev.key) && state.currentView === "detail") {
+      const idx = Number(ev.key);
+      const btn = $(["btn-request", "btn-fetch", "btn-ingest", "btn-submit"][idx - 1]);
+      if (btn) {
+        ev.preventDefault();
+        btn.focus();
+      }
+      return;
+    }
+
+    // /：聚焦目前畫面上的搜尋框（政策目錄）
+    if (ev.key === "/" && state.currentView === "policy") {
+      const search = $("policy-search");
+      if (search) {
+        ev.preventDefault();
+        search.focus();
+      }
     }
   });
   $("btn-request")?.addEventListener("click", () => callTool("request_emissions"));
@@ -1243,7 +1834,11 @@ function bind() {
       showError("請先在上方選一家供應商");
       return;
     }
-    window.open(`${API}/pcf/${encodeURIComponent(sid)}/pact`, "_blank");
+    openPactPreview(sid);
+  });
+  $("pact-modal-close")?.addEventListener("click", closePactPreview);
+  $("pact-modal")?.addEventListener("click", (ev) => {
+    if (ev.target.id === "pact-modal") closePactPreview();
   });
   $("dash-btn-reset-hero")?.addEventListener("click", resetDemo);
   $("dash-next-body")?.addEventListener("click", (ev) => {
@@ -1314,7 +1909,62 @@ function bind() {
   });
 }
 
+const THEME_KEY = "mandate-theme";
+
+function applyTheme(theme) {
+  document.documentElement.setAttribute("data-theme", theme);
+  const btn = $("btn-theme-toggle");
+  if (btn) btn.innerHTML = icon(theme === "dark" ? "sun" : "moon", "micon-sm");
+}
+
+function initTheme() {
+  let saved = null;
+  try {
+    saved = localStorage.getItem(THEME_KEY);
+  } catch {
+    /* ignore */
+  }
+  if (saved === "dark" || saved === "light") applyTheme(saved);
+  else applyTheme(window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+
+  $("btn-theme-toggle")?.addEventListener("click", () => {
+    const next = document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark";
+    applyTheme(next);
+    try {
+      localStorage.setItem(THEME_KEY, next);
+    } catch {
+      /* ignore */
+    }
+  });
+}
+
+function initStaticIcons() {
+  document.querySelectorAll("[data-icon]").forEach((el) => {
+    el.insertAdjacentHTML("afterbegin", icon(el.dataset.icon, "micon-sm"));
+  });
+  const tipIcon = $("tip-bar-icon");
+  if (tipIcon) tipIcon.innerHTML = icon("info");
+  const drawerIcon = $("audit-drawer-icon");
+  if (drawerIcon) drawerIcon.innerHTML = icon("history", "micon-sm");
+  const connIcon = $("connectivity-banner-icon");
+  if (connIcon) connIcon.innerHTML = icon("wifi-off");
+  const stepErrIcon = $("step-error-icon");
+  if (stepErrIcon) stepErrIcon.innerHTML = icon("alert", "micon-sm");
+  const cmdkIcon = $("cmdk-input-icon");
+  if (cmdkIcon) cmdkIcon.innerHTML = icon("search");
+}
+
+function initConnectivity() {
+  window.addEventListener("online", updateConnectivityBanner);
+  window.addEventListener("offline", updateConnectivityBanner);
+  updateConnectivityBanner();
+}
+
+initTheme();
+initStaticIcons();
+initConnectivity();
 bind();
+bindCmdk();
 initOnboarding();
 initResultSheet({
   getState: () => state,
@@ -1323,7 +1973,7 @@ initResultSheet({
 });
 initPolicyConsole({ api, setViewDetail });
 initPolicyGuide({ runPreset: runPolicyPreset });
-initCaseSummary({ api });
+initSuppliersOverview({ api, jumpToSupplier });
 initTour({
   setViewDashboard,
   setViewDetail,

@@ -54,6 +54,8 @@
   flex: 1;
   overflow-y: auto;
   padding: var(--space-5);
+  /* 固定最小高度，讓「下一頁」按鈕在 6 頁之間垂直位置不跳動（問題 7） */
+  min-height: 360px;
 }
 
 .pg-slide-visual {

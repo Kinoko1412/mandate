@@ -38,6 +38,7 @@ function buildTimeline(supplierId, auditEvents, limit) {
       decision: ev.decision,
       policyId: ev.policyId,
       reasoningSummary: ev.reasoningSummary,
+      uncertainPoints: ev.uncertainPoints || [],
     }));
 }
 

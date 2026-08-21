@@ -2,6 +2,8 @@
  * Policy Engine Console — transparent evaluation for judges
  */
 
+import { emptyState, icon } from "./icons.js";
+
 const TOOL_OPTIONS = [
   { value: "request_emissions", label: "① 索取 request_emissions" },
   { value: "fetch_supplier_response", label: "② 取回 fetch_supplier_response" },
@@ -57,7 +59,9 @@ let apiFn = null;
 let gotoDetailFn = null;
 let suppliers = [];
 let policies = [];
-let stepFilter = 0;
+const STEP_CHIPS = [0, 1, 2, 3, 4, 5, 6];
+let stepFilters = new Set(); // 空集合 = 全部步驟
+let searchKw = "";
 
 function $(id) {
   return document.getElementById(id);
@@ -85,23 +89,76 @@ function traceStatusClass(status) {
   return "skipped";
 }
 
+function highlight(text, kw) {
+  const s = String(text ?? "");
+  if (!kw) return escapeHtml(s);
+  const idx = s.toLowerCase().indexOf(kw.toLowerCase());
+  if (idx === -1) return escapeHtml(s);
+  return (
+    escapeHtml(s.slice(0, idx)) +
+    `<mark class="policy-hl">${escapeHtml(s.slice(idx, idx + kw.length))}</mark>` +
+    escapeHtml(s.slice(idx + kw.length))
+  );
+}
+
+function renderStepChips() {
+  const wrap = $("policy-step-chips");
+  if (!wrap) return;
+  wrap.innerHTML = STEP_CHIPS.map((step) => {
+    const active = step === 0 ? stepFilters.size === 0 : stepFilters.has(step);
+    const label = step === 0 ? "全部" : `步驟 ${step}`;
+    return `<button type="button" class="policy-chip${active ? " active" : ""}" data-step="${step}">${label}</button>`;
+  }).join("");
+  wrap.querySelectorAll(".policy-chip").forEach((chip) => {
+    chip.addEventListener("click", () => {
+      const step = Number(chip.dataset.step);
+      if (step === 0) {
+        stepFilters.clear();
+      } else {
+        if (stepFilters.has(step)) stepFilters.delete(step);
+        else stepFilters.add(step);
+      }
+      renderStepChips();
+      renderCatalog();
+    });
+  });
+}
+
 function renderCatalog() {
   const ul = $("policy-catalog");
+  const noResult = $("policy-no-result");
+  const count = $("policy-search-count");
   if (!ul) return;
-  const filtered =
-    stepFilter > 0
-      ? policies.filter((p) => p.evalStep === stepFilter)
-      : policies;
+  const kw = searchKw.trim();
+  const filtered = policies.filter((p) => {
+    const stepOk = stepFilters.size === 0 || stepFilters.has(p.evalStep);
+    const kwOk =
+      !kw ||
+      `${p.policyId} ${p.title} ${p.summary || ""}`.toLowerCase().includes(kw.toLowerCase());
+    return stepOk && kwOk;
+  });
+  if (count) count.textContent = `顯示 ${filtered.length} / 共 ${policies.length} 筆`;
   if (!filtered.length) {
-    ul.innerHTML = '<li class="feed-empty">無符合規則</li>';
+    ul.innerHTML = "";
+    ul.hidden = true;
+    if (noResult) {
+      noResult.hidden = false;
+      noResult.innerHTML = emptyState({
+        iconName: "search-off",
+        headline: "找不到符合的規則，換個關鍵字試試",
+        body: "",
+      });
+    }
     return;
   }
+  ul.hidden = false;
+  if (noResult) noResult.hidden = true;
   ul.innerHTML = filtered
     .map(
       (p) => `
     <li data-policy-id="${escapeHtml(p.policyId)}" title="${escapeHtml(p.summary || "")}">
-      <div class="pid">${escapeHtml(p.policyId)} · step ${p.evalStep || "—"}</div>
-      <div class="ptitle">${escapeHtml(p.title)}</div>
+      <div class="pid">${highlight(p.policyId, kw)} · step ${p.evalStep || "—"}</div>
+      <div class="ptitle">${highlight(p.title, kw)}</div>
     </li>`
     )
     .join("");
@@ -114,10 +171,12 @@ function renderPipeline(trace) {
     ul.innerHTML = '<li class="feed-empty">執行模擬後顯示六步管線</li>';
     return;
   }
+  // 依序逐格顯示（每格間隔 90ms），讓「短路管線」的敘事看起來像真的在跑，
+  // 而不是六步一次全部瞬間出現。
   ul.innerHTML = trace
-    .map((t) => {
+    .map((t, i) => {
       const cls = traceStatusClass(t.status);
-      const icon =
+      const glyph =
         t.status === "pass"
           ? "✓"
           : t.status === "fail"
@@ -126,8 +185,8 @@ function renderPipeline(trace) {
               ? "!"
               : "—";
       return `
-      <li class="${cls}">
-        <span class="pipeline-step-num" aria-hidden="true">${icon}</span>
+      <li class="${cls} pipeline-reveal" style="animation-delay:${i * 90}ms">
+        <span class="pipeline-step-num" aria-hidden="true">${glyph}</span>
         <div class="pipeline-body">
           <div class="pipeline-title">${t.step}. ${escapeHtml(t.title)}</div>
           ${t.detail ? `<div class="pipeline-detail">${escapeHtml(t.detail)}</div>` : ""}
@@ -143,7 +202,15 @@ function renderResult(data, hint) {
   if (!box) return;
   if (!data) {
     box.className = "policy-result empty";
-    box.innerHTML = "選擇情境或填寫模擬器，按「執行模擬」。<strong>不會寫入 audit</strong>。";
+    box.innerHTML = emptyState({
+      iconName: "flask",
+      headline: "選好條件，看規則怎麼判",
+      body: "選工具、角色、供應商後按執行模擬，六步管線會即時顯示判定過程",
+      context: "不會寫入 audit",
+      ctaId: "policy-empty-try",
+      ctaLabel: "用範例快速試試",
+    });
+    box.querySelector("#policy-empty-try")?.addEventListener("click", () => runPolicyPreset("act1"));
     renderPipeline(null);
     return;
   }
@@ -306,8 +373,8 @@ function renderQuickstart() {
 }
 
 function bindPolicyConsole() {
-  $("policy-step-filter")?.addEventListener("change", (ev) => {
-    stepFilter = Number(ev.target.value) || 0;
+  $("policy-search")?.addEventListener("input", (ev) => {
+    searchKw = ev.target.value || "";
     renderCatalog();
   });
   $("policy-sim-run")?.addEventListener("click", () => runSimulate());
@@ -338,6 +405,9 @@ export async function refreshPolicyConsole() {
 export function initPolicyConsole({ api, setViewDetail }) {
   apiFn = api;
   gotoDetailFn = setViewDetail;
+  const searchIcon = $("policy-search-icon");
+  if (searchIcon) searchIcon.innerHTML = icon("search", "micon-sm");
+  renderStepChips();
   renderSimulatorOptions();
   renderPresets();
   renderQuickstart();

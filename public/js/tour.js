@@ -672,18 +672,22 @@ export function initTour(cbs = {}) {
   $("tour-skip")?.addEventListener("click", skipTour);
 }
 
-export function openHelpMenu({ onFullTour, onDemoTour, onWizard, onPolicyGuide }) {
+export function openHelpMenu({ onFullTour, onDemoTour, onWizard, onPolicyGuide, onShowTip, onSimOffline }) {
   const menu = $("help-menu");
+  const trigger = $("btn-onboard-help");
   if (!menu) {
     onFullTour?.();
     return;
   }
   const wasOpen = !menu.hidden;
   menu.hidden = true;
+  trigger?.setAttribute("aria-expanded", "false");
   if (wasOpen) return;
   menu.hidden = false;
+  trigger?.setAttribute("aria-expanded", "true");
   const close = () => {
     menu.hidden = true;
+    trigger?.setAttribute("aria-expanded", "false");
     document.removeEventListener("click", onDocClick);
   };
   const onDocClick = (ev) => {
@@ -709,4 +713,6 @@ export function openHelpMenu({ onFullTour, onDemoTour, onWizard, onPolicyGuide }
   bindOnce("help-menu-tour", onDemoTour);
   bindOnce("help-menu-wizard", onWizard);
   bindOnce("help-menu-policy", onPolicyGuide);
+  bindOnce("help-menu-tip", onShowTip);
+  bindOnce("help-menu-sim-offline", onSimOffline);
 }

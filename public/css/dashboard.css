@@ -10,30 +10,7 @@
   gap: var(--space-4);
 }
 
-.tip-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
-  padding: 6px var(--space-5);
-  background: var(--brand-wash);
-  border-bottom: 1px solid var(--line);
-  font-size: 12px;
-  color: var(--ink-muted);
-}
-
-.tip-bar[hidden] {
-  display: none !important;
-}
-
-.tip-dismiss {
-  border: none;
-  background: transparent;
-  font-size: 18px;
-  line-height: 1;
-  color: var(--ink-faint);
-  padding: 0 4px;
-}
+/* .tip-bar / .tip-dismiss now defined once in app.css (fuller redesign) */
 
 .sr-only {
   position: absolute;
@@ -143,12 +120,21 @@
 
 .step-dot {
   flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
   text-align: center;
   font-size: 10px;
   padding: 4px 2px;
   color: var(--ink-faint);
   background: transparent;
   white-space: nowrap;
+}
+
+.step-dot .micon {
+  width: 10px;
+  height: 10px;
 }
 
 .step-dot.done {

@@ -1,31 +1,61 @@
-/* Mandate design tokens — industrial console */
+/* Mandate design tokens — 對齊 Mandate_視覺系統重新設計.md 第 2、4、12 節
+   與 Mandate_設計系統.html 的權威色票（含深色模式）。 */
 :root {
-  --bg: #F3F0EA;
-  --bg-elevated: #FAF8F4;
-  --bg-inset: #EBE7DF;
+  /* ── 版面角色 token（淺色） ── */
+  --bg: #F7F5EF;
+  --bg-elevated: #FFFFFF;
+  --bg-inset: #EFEDE5;
   --ink: #1A1A18;
-  --ink-muted: #5C5A54;
-  --ink-faint: #8A877E;
-  --line: #C9C3B6;
-  --line-strong: #A39E90;
+  --ink-muted: #5F5E5A;
+  --ink-faint: #888780;
+  --line: #E3E1D8;
+  --line-strong: #C9C7BC;
 
-  --brand: #2F5D50;
-  --brand-deep: #244A40;
-  --brand-wash: #D8E4DF;
+  --brand: #0F6E56;
+  --brand-deep: #0C5A46;
+  --brand-wash: #E1F5EE;
+  --brand-on: #FFFFFF;
 
-  --alert: #9A4E2C;
-  --alert-deep: #7A3D22;
-  --alert-wash: #EDE0D8;
+  /* ── 狀態色（bg + ink + border 三件一組，一律搭配圖示，不單靠顏色） ── */
+  --success: #639922;
+  --success-deep: #27500A;
+  --success-bg: #EAF3DE;
+  --success-ink: #27500A;
 
-  --ok: #2F5D50;
-  --warn: #8A6A2F;
-  --deny: #9A4E2C;
+  --danger: #E24B4A;
+  --danger-deep: #791F1F;
+  --danger-bg: #FCEBEB;
+  --danger-ink: #791F1F;
+
+  --warning: #EF9F27;
+  --warning-deep: #633806;
+  --warning-bg: #FAEEDA;
+  --warning-ink: #633806;
+
+  --neutral-bg: #EFEDE5;
+  --neutral-ink: #5F5E5A;
+
+  /* ── 舊別名，保留給既有 CSS 沿用，數值一律指到上面的權威 token ── */
+  --alert: var(--danger);
+  --alert-deep: var(--danger-deep);
+  --alert-wash: var(--danger-bg);
+  --ok: var(--success);
+  --warn: var(--warning-deep);
+  --deny: var(--danger);
+
+  /* ── AGENT／HUMAN 角色識別色（跟判斷結果色故意用不同色相，避免混淆） ── */
+  --pro: #7F77DD;
+  --pro-deep: #3C3489;
+  --pro-bg: #EEEDFE;
+  --pro-ink: #3C3489;
 
   --font-display: "Fraunces", "Georgia", serif;
-  --font-body: "IBM Plex Sans", "Helvetica Neue", sans-serif;
+  --font-body: "IBM Plex Sans", "Noto Sans TC", "Microsoft JhengHei", "Helvetica Neue", sans-serif;
+  --font-mono: "IBM Plex Mono", "Consolas", monospace;
 
   --radius: 4px;
   --radius-max: 6px;
+  --radius-card: 12px;
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
@@ -37,4 +67,108 @@
   --col-gap: 1px;
   --shadow-none: none;
   --ease: 180ms ease;
+
+  /* ── Motion ── */
+  --dur-fast: 160ms;
+  --dur-base: 320ms;
+  --dur-slow: 700ms;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* ── Icon sizing ── */
+  --icon-sm: 14px;
+  --icon-md: 18px;
+  --icon-lg: 28px;
+}
+
+/* ── 深色模式：只換色彩，不動版面／間距／圖示（設計文件第 12 節原則 1） ──
+   套用時機：使用者手動切換（[data-theme="dark"]，由 JS 存 localStorage 決定），
+   或系統偏好且使用者沒手動選過（:root:not([data-theme="light"])）。 */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #171715;
+    --bg-elevated: #222220;
+    --bg-inset: #292926;
+    --ink: #F2F1EC;
+    --ink-muted: #B4B2A9;
+    --ink-faint: #888780;
+    --line: #3A3934;
+    --line-strong: #4C4A44;
+
+    --brand: #5DCAA5;
+    --brand-deep: #74D3B2;
+    --brand-wash: #04342C;
+    --brand-on: #04342C;
+
+    --success: #3B6D11;
+    --success-deep: #97C459;
+    --success-bg: #173404;
+    --success-ink: #97C459;
+
+    --danger: #A32D2D;
+    --danger-deep: #F09595;
+    --danger-bg: #501313;
+    --danger-ink: #F09595;
+
+    --warning: #854F0B;
+    --warning-deep: #EF9F27;
+    --warning-bg: #412402;
+    --warning-ink: #EF9F27;
+
+    --neutral-bg: #292926;
+    --neutral-ink: #B4B2A9;
+
+    --pro: #534AB7;
+    --pro-deep: #AFA9EC;
+    --pro-bg: #26215C;
+    --pro-ink: #AFA9EC;
+  }
+}
+
+:root[data-theme="dark"] {
+  --bg: #171715;
+  --bg-elevated: #222220;
+  --bg-inset: #292926;
+  --ink: #F2F1EC;
+  --ink-muted: #B4B2A9;
+  --ink-faint: #888780;
+  --line: #3A3934;
+  --line-strong: #4C4A44;
+
+  --brand: #5DCAA5;
+  --brand-deep: #74D3B2;
+  --brand-wash: #04342C;
+  --brand-on: #04342C;
+
+  --success: #3B6D11;
+  --success-deep: #97C459;
+  --success-bg: #173404;
+  --success-ink: #97C459;
+
+  --danger: #A32D2D;
+  --danger-deep: #F09595;
+  --danger-bg: #501313;
+  --danger-ink: #F09595;
+
+  --warning: #854F0B;
+  --warning-deep: #EF9F27;
+  --warning-bg: #412402;
+  --warning-ink: #EF9F27;
+
+  --neutral-bg: #292926;
+  --neutral-ink: #B4B2A9;
+
+  --pro: #534AB7;
+  --pro-deep: #AFA9EC;
+  --pro-bg: #26215C;
+  --pro-ink: #AFA9EC;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
 }

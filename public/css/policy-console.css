@@ -195,6 +195,9 @@
 }
 
 .policy-result.empty {
+  padding: 0;
+  border: none;
+  background: transparent;
   color: var(--ink-muted);
   font-size: 0.875rem;
 }

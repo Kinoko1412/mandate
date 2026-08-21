@@ -190,6 +190,7 @@ function appendAudit(partial) {
     inputHash: partial.inputHash || (partial.argsDigest ? `sha256:${partial.argsDigest}` : null),
     inputRedacted: partial.inputRedacted || null,
     reasoningSummary: partial.reasoningSummary || null,
+    uncertainPoints: partial.uncertainPoints || null,
     eventKind: partial.eventKind || 'TOOL_DECISION',
   };
   state.audit.push(event);

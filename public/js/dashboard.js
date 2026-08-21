@@ -2,6 +2,8 @@
  * 主控版渲染 — 資料來源：/api/session + /api/audit
  */
 
+import { icon } from "./icons.js";
+
 function escapeHtml(s) {
   return String(s)
     .replace(/&/g, "&amp;")
@@ -205,6 +207,11 @@ function mapTourAct(ev) {
   return "step";
 }
 
+function stepDot(numeral, label, cls) {
+  const mark = cls === "done" ? icon("check", "micon-sm") : cls === "blocked" ? icon("x", "micon-sm") : "";
+  return `<span class="step-dot ${cls}">${mark}${numeral} ${label}</span>`;
+}
+
 function pipelineStepClass(p, step) {
   const d = p.lastDecision;
   if (step === 2) {
@@ -273,10 +280,10 @@ export function renderDashboard(ctx) {
         card.innerHTML = `
           <h3 class="pipeline-name">${escapeHtml(p.orgName || p.supplierId)}</h3>
           <div class="pipeline-steps">
-            <span class="step-dot ${p.requested ? "done" : ""}">① 索取</span>
-            <span class="step-dot ${pipelineStepClass(p, 2)}">② 取回</span>
-            <span class="step-dot ${pipelineStepClass(p, 3)}">③ 檢查</span>
-            <span class="step-dot ${pipelineStepClass(p, 4)}">④ 申請</span>
+            ${stepDot("①", "索取", p.requested ? "done" : "")}
+            ${stepDot("②", "取回", pipelineStepClass(p, 2))}
+            ${stepDot("③", "檢查", pipelineStepClass(p, 3))}
+            ${stepDot("④", "申請", pipelineStepClass(p, 4))}
           </div>
           <p class="pipeline-status">${escapeHtml(pipelineStatusText(p))}</p>
           <p class="recent-meta">${escapeHtml(lastDecisionText(p))}</p>

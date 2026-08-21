@@ -1,6 +1,7 @@
 'use strict';
 
 const { getMissingLevel1, PCF_LEVEL2_FIELDS } = require('./pcfCheck');
+const { detectUncertainPoints } = require('./uncertaintyMarkers');
 
 const FIELD_LABELS = {
   method: '計算方法',
@@ -15,12 +16,12 @@ const FIELD_LABELS = {
   verificationReportId: '查驗報告編號',
 };
 
-function plainReason(decision, policyId, reason, input) {
+function plainReason(decision, policyId, reason, input, toolName) {
   if (policyId === 'POL-CARB-001') {
     const missing = input ? getMissingLevel1(input) : [];
     const list = missing.map((k) => FIELD_LABELS[k] || k).join('、');
     if (list) {
-      return `這份回覆缺 ${list}。若直接給客戶去申報，很可能被要求改填預設值或補件，已拒收。`;
+      return `缺 ${missing.length} 個欄位：${list}。補齊後可重新取回。`;
     }
     return '這份回覆只有漂亮噸數（或缺方法／邊界／期間／單位），不能當可稽核碳數據，已拒收。';
   }
@@ -55,6 +56,16 @@ function plainReason(decision, policyId, reason, input) {
     return reason || '匯出條件不符（可能尚無可匯出的草稿或紀錄）。';
   }
   if (policyId === 'POL-ALLOW-000' || decision === 'ALLOW') {
+    if (toolName === 'ingest_pcf_payload' && input && input.unit && input.boundary) {
+      const points = detectUncertainPoints(input);
+      const unitFlag = points.some((p) => p.field === 'unit')
+        ? '（非標準寫法，已依常見寫法換算）'
+        : '';
+      const boundaryFlag = points.some((p) => p.field === 'boundary')
+        ? '（未明確對應 Scope 分類，已依上下文推測）'
+        : '';
+      return `排放量單位標示為「${input.unit}」${unitFlag}，系統邊界填寫「${input.boundary}」${boundaryFlag}，其餘欄位已通過品質檢查，已進入暫存區，可進一步申請寫入申報。`;
+    }
     if (/ingest|staging|品質/i.test(reason || '')) {
       return '品質欄位齊全，已進入暫存區，可進一步申請寫入申報。';
     }

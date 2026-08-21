@@ -5,6 +5,7 @@ const store = require('./store');
 const { plainReason } = require('./plainReason');
 const { enrichPayloadWithQualityTier } = require('./pcfCheck');
 const vleiCheck = require('./vleiCheck');
+const { detectUncertainPoints } = require('./uncertaintyMarkers');
 
 function runEvaluate(toolName, input, actor, approval) {
   const state = store.getState();
@@ -25,10 +26,10 @@ function runEvaluate(toolName, input, actor, approval) {
   });
 }
 
-function attachPlain(decision, input) {
+function attachPlain(decision, input, toolName) {
   return {
     ...decision,
-    plainReason: plainReason(decision.decision, decision.policyId, decision.reason, input),
+    plainReason: plainReason(decision.decision, decision.policyId, decision.reason, input, toolName),
   };
 }
 
@@ -150,7 +151,7 @@ function buildClientDraftText(staged, supplier) {
 function buildAuditText(events) {
   const lines = ['【Mandate 稽核時間軸】', ''];
   for (const ev of events) {
-    const pr = plainReason(ev.decision, ev.policyId, ev.reason, null);
+    const pr = plainReason(ev.decision, ev.policyId, ev.reason, null, ev.toolName);
     lines.push(`${ev.ts || ''} | ${ev.toolName || '—'} | ${ev.decision} | ${pr}`);
   }
   return lines.join('\n');
@@ -158,7 +159,7 @@ function buildAuditText(events) {
 
 function invokeTool(toolId, cleanInput, actor, approval) {
   const decisionRaw = runEvaluate(toolId, cleanInput, actor, approval);
-  const decision = attachPlain(decisionRaw, cleanInput);
+  const decision = attachPlain(decisionRaw, cleanInput, toolId);
   const digest = store.argsDigest(cleanInput);
 
   let approvalObj = null;
@@ -192,6 +193,11 @@ function invokeTool(toolId, cleanInput, actor, approval) {
     httpStatus = 403;
   }
 
+  const uncertainPoints =
+    toolId === 'ingest_pcf_payload' && decision.decision === 'ALLOW'
+      ? detectUncertainPoints(cleanInput)
+      : [];
+
   const audit = store.appendAudit({
     principalId: store.getState().principal.principalId,
     actorId: actor.actorId,
@@ -201,6 +207,7 @@ function invokeTool(toolId, cleanInput, actor, approval) {
     policyId: decision.policyId,
     reason: decision.reason,
     reasoningSummary: decision.plainReason,
+    uncertainPoints: uncertainPoints.length ? uncertainPoints : null,
     approvalId: approvalObj ? approvalObj.approvalId : null,
     argsDigest: digest,
     inputRedacted: {

@@ -2,6 +2,8 @@
  * 動作結果彈窗 + 持久收件箱
  */
 
+import { icon, toneIcon } from "./icons.js";
+
 const PCF_REQUIRED = ["tCO2e", "unit", "method", "boundary", "period", "supplierId"];
 
 const FIELD_LABELS = {
@@ -362,20 +364,33 @@ function renderSheetTable(rows) {
 export function showResultSheet(sheet) {
   const overlay = $("result-sheet");
   if (!overlay || !sheet) return;
+  const tone = sheet.tone || "neutral";
 
   $("result-sheet-title").textContent = sheet.title || "動作結果";
   $("result-sheet-sub").textContent = sheet.subtitle || "";
   const badge = $("result-sheet-badge");
   if (badge) {
     badge.textContent = decisionBadgeText(sheet.decision);
-    badge.className = `result-decision-badge tone-${sheet.tone || "neutral"}`;
+    badge.className = `result-decision-badge tone-${tone}`;
   }
+  const iconSlot = $("result-sheet-icon");
+  if (iconSlot) iconSlot.innerHTML = toneIcon(tone);
   $("result-sheet-content").innerHTML = `
     ${renderSheetTable(sheet.rows)}
     <p class="result-summary">${escapeHtml(sheet.summary || "")}</p>
     ${sheet.nextStep ? `<p class="result-next">${escapeHtml(sheet.nextStep)}</p>` : ""}
     <p class="result-policy">policyId：${escapeHtml(sheet.policyId || "—")}</p>
   `;
+
+  const dialog = overlay.querySelector(".result-sheet-dialog");
+  if (dialog) {
+    dialog.classList.remove("anim-shake");
+    dialog.dataset.tone = tone;
+    if (tone === "deny") {
+      void dialog.offsetWidth;
+      dialog.classList.add("anim-shake");
+    }
+  }
 
   overlay.hidden = false;
   document.body.classList.add("result-sheet-open");
@@ -463,6 +478,8 @@ export function renderInbox(appState) {
   });
 }
 
+let lastBannerId = null;
+
 export function renderDashInboxBanner(appState) {
   const banner = $("dash-inbox-banner");
   const text = $("dash-inbox-text");
@@ -471,6 +488,7 @@ export function renderDashInboxBanner(appState) {
 
   if (!latest) {
     banner.hidden = true;
+    lastBannerId = null;
     return;
   }
 
@@ -479,7 +497,14 @@ export function renderDashInboxBanner(appState) {
       ? summarizePayload(latest.payload)
       : latest.title;
   text.textContent = `最新收到：${latest.supplierName || ""} — ${meta}`;
+  const wasHidden = banner.hidden;
   banner.hidden = false;
+  if (wasHidden || latest.id !== lastBannerId) {
+    banner.classList.remove("anim-banner-in");
+    void banner.offsetWidth;
+    banner.classList.add("anim-banner-in");
+  }
+  lastBannerId = latest.id;
 }
 
 export function clearInbox(appState) {
@@ -488,28 +513,35 @@ export function clearInbox(appState) {
   renderDashInboxBanner(appState);
 }
 
+/**
+ * 只改小圓圈節點內容（數字 ↔ 打勾），不改按鈕文字本身——避免完成狀態把
+ * 「① 索取」變成「① 已索取 ✓」這種變寬文字，擠得後面按鈕跟著位移
+ * （之前手動操作時真的因此誤點過相鄰按鈕，是本次改版明確要修的項目）。
+ */
 export function updateStepButtons(appState) {
   const supplierId = callbacks.selectedSupplierId?.() || "";
   const pipeline = appState.session?.supplierPipeline || [];
   const p = pipeline.find((x) => x.supplierId === supplierId);
   const fetched = !!(supplierId && appState.lastFetchedPayload?.[supplierId]);
 
-  const setBtn = (id, done, labelDone, labelDefault) => {
+  const setBtn = (id, num, done) => {
     const btn = $(id);
-    if (!btn) return;
-    btn.classList.toggle("btn-done", !!done);
-    btn.textContent = done ? labelDone : labelDefault;
+    const node = $(`${id}-node`);
+    if (!btn || !node) return;
+    const wasDone = btn.classList.contains("is-done");
+    btn.classList.toggle("is-done", !!done);
+    node.innerHTML = done ? icon("check", "micon-sm") : String(num);
+    if (done && !wasDone) {
+      node.classList.remove("anim-pop-in");
+      void node.offsetWidth;
+      node.classList.add("anim-pop-in");
+    }
   };
 
-  setBtn("btn-request", p?.requested, "① 已索取 ✓", "① 索取");
-  setBtn("btn-fetch", fetched, "② 已取回 ✓", "② 取回回覆");
-  setBtn("btn-ingest", p?.staged, "③ 已檢查 ✓", "③ 品質檢查");
-  setBtn(
-    "btn-submit",
-    p?.pendingApproval,
-    "④ 已申請 ✓",
-    "④ 申請寫入"
-  );
+  setBtn("btn-request", 1, p?.requested);
+  setBtn("btn-fetch", 2, fetched);
+  setBtn("btn-ingest", 3, p?.staged);
+  setBtn("btn-submit", 4, p?.pendingApproval);
 }
 
 /**
