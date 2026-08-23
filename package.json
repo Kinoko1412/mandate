@@ -7,7 +7,8 @@
     "dev:cf": "wrangler dev",
     "deploy:cf": "wrangler deploy",
     "smoke": "node server/smoke.js",
-    "smoke:agent": "node server/agent-smoke.js"
+    "smoke:agent": "node server/agent-smoke.js",
+    "smoke:carbon-core": "node tests/carbon-core/smoke.js"
   },
   "devDependencies": {
     "wrangler": "^4.24.0"
