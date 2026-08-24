@@ -13,7 +13,8 @@
     "smoke:ui": "node tests/ui/static-contract.js",
     "smoke:trust": "node tests/trust/smoke.js",
     "smoke:zk": "node tests/trust/zk.smoke.js",
-    "smoke:evidence-agent": "node tests/agent/smoke.js"
+    "smoke:evidence-agent": "node tests/agent/smoke.js",
+    "smoke:evidence-agent-llm": "node tests/agent/llm.smoke.js"
   },
   "devDependencies": {
     "circomlib": "^2.0.5",

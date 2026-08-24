@@ -53,3 +53,43 @@
   命題假設的多階段分解，且即時接入有真實密碼學運算延遲，這是需要 A/B 一起決定的產品/
   架構問題，不是我能自己拍板的事，已完整寫在 `circuits/README.md`「架構決策」一節並附上
   建議的最小接線路徑（技術上可行，已被測試間接證明）。
+
+### 2. 全面 LLM Evidence Agent 測試（gpt-5-mini，含 OCR）— ✅ 完成
+
+- 模型：`openai/gpt-5-mini`（查證過即時報價後建議，已跟你確認）。**真實踩到的相容性坑**：
+  GPT-5 系列是推理模型，`max_tokens` 太小時全部被內部 reasoning token 吃光，`content`
+  會是空字串（`finish_reason: length`）——要嘛拉高 `max_tokens`、要嘛用
+  `reasoning:{effort:'minimal'}` 關掉大部分推理，兩者我都用了（`max_tokens:2000` +
+  `reasoning.effort:'minimal'`），已在 `services/agent/llmExtract.js` 裡固定下來。
+- **架構**：LLM 只取代「怎麼從文件文字抽出候選欄位」這一步（`services/agent/llmExtract.js`），
+  安全過濾／單位驗證／跨文件 heuristic／缺件偵測全部**沿用**規則引擎既有的確定性函式
+  （`services/agent/index.js` 新增匯出，供 `services/agent/analyzeLlm.js` 重用，規則引擎
+  本身完全沒被改動）。
+- **證據分段**：照你的裁示，每份文件各自獨立呼叫一次 LLM，不共用 context/歷史。
+- **OCR**：用本機已安裝的 Tesseract 5.5.0（CLI）處理圖片證據，OCR 出來的雜訊文字再交給
+  LLM 結構化抽取（兩階段，不依賴 gpt-5-mini 是否支援 vision，沒有用猜的）。合成測試圖檔用
+  headless Chrome 截圖產生（`tests/agent/fixtures/electricity_bill_scan.png`），真實 OCR
+  出來的文字有雜訊（`unit=>MWh`、`humanConfirmed` 被截斷成 `hum`），LLM 正確還原出
+  `electricityMWh=850, unit=MWh`，且沒有因為看不到完整 `humanConfirmed=true` 就亂猜成 true
+  （保守、正確的行為）。
+- **低信心值一律人工確認**：沿用既有 `eligibleForCalculation` 邏輯，沒有另外處理，因為
+  下游本來就是這樣做的。
+- **失敗定義**：呼叫失敗／逾時／HTTP 非 2xx／JSON 格式錯誤／canonical RiskReport 驗證不過，
+  一律視為失敗，整案（不是部分文件）退回規則引擎——`server/agentAdapter.js` 新增
+  `analyzeCaseWithLlm()`，回傳 `{report, usedFallback, fallbackReason}`；**既有的
+  `analyzeCase()`（純規則引擎）完全沒被改動**，這是額外新增的並行路徑，還沒有接進
+  `/api/cases/:id/agent/analyze` 這個既有 API（刻意，理由跟 ZK 電路一樣：這是先測試，
+  要不要正式換掉現有端點是需要 A 一起決定的產品範圍問題）。
+- **Prompt/response 記錄**：`server/supabaseSync.js` 新增 `syncEvidenceLlmPrompt()`，沿用
+  既有 fire-and-forget 模式；本機沒設定 `SUPABASE_URL` 所以目前不會真的寫入，需要的表格
+  schema 已寫在程式碼註解裡（`evidence_llm_prompts`），要用的話你要自己在 Supabase SQL
+  editor 建表。
+- **Gate 不受影響**：這個模組跟規則引擎一樣只產生 RiskReport，不呼叫任何 Gate/Policy
+  函式，`DECISIONS.md`「不讓 LLM 自判權限」的紅線沒有被碰。
+- **測試**（`tests/agent/llm.smoke.js`，`npm run smoke:evidence-agent-llm`，都是真實打
+  OpenRouter API，不是 mock）：5 項全過——正常抽取、OCR 抽取正確性、prompt injection
+  抵抗力（LLM 沒有被文件內嵌的「SYSTEM OVERRIDE」指令誘導捏造欄位）、跨文件 heuristic
+  確實是確定性程式碼在判斷（不是 LLM 自己講的）、API key 清空時正確自動退回規則引擎。
+- **既有 165+6 項測試重跑確認零回歸**。
+
+### 3-4. 背景待辦 1（vLEI）／背景待辦 2（GS1/DPP）— 待做，接下來處理

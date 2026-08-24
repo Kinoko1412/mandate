@@ -172,6 +172,42 @@ function syncApproval(approval) {
   );
 }
 
+// Day 5：全面 LLM Evidence Agent 測試（services/agent/llmExtract.js）的 prompt/response
+// 稽核紀錄，跟既有 audit_log/approvals/ai_messages 同一套 fire-and-forget 模式——失敗只
+// warn，不影響 Evidence Agent 分析本身。SUPABASE_URL 沒設就完全不啟用（isConfigured() 擋掉）。
+//
+// 表格需要使用者自己在 Supabase SQL editor 建立（這裡沒有 migration 機制，跟現有三張表
+// 一樣是手動建的），schema 建議：
+//   create table evidence_llm_prompts (
+//     id bigint generated always as identity primary key,
+//     boot_id text not null,
+//     ts timestamptz not null default now(),
+//     filename text,
+//     evidence_type text,
+//     model text,
+//     system_prompt text,
+//     user_prompt text,
+//     response_content text,
+//     usage jsonb,
+//     duration_ms integer
+//   );
+// 表不存在時 postRow() 會 retry 後 warn 並吞掉錯誤，不會讓 Evidence Agent 分析中斷。
+function syncEvidenceLlmPrompt(entry) {
+  if (!entry || !isConfigured()) return;
+  postRow('evidence_llm_prompts', {
+    boot_id: getBootId(),
+    ts: new Date().toISOString(),
+    filename: entry.filename || null,
+    evidence_type: entry.evidenceType || null,
+    model: entry.model || null,
+    system_prompt: entry.systemPrompt || null,
+    user_prompt: entry.userPrompt || null,
+    response_content: entry.responseContent || null,
+    usage: entry.usage || null,
+    duration_ms: Number.isFinite(entry.durationMs) ? entry.durationMs : null,
+  });
+}
+
 function syncMessage(sessionId, message) {
   if (!message || !isConfigured()) return;
   postRow('ai_messages', {
@@ -217,6 +253,7 @@ module.exports = {
   isConfigured,
   syncAuditEvent,
   syncApproval,
+  syncEvidenceLlmPrompt,
   syncMessage,
   fetchAuditLog,
   verifyAuditChain,

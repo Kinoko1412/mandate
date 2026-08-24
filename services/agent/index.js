@@ -567,4 +567,15 @@ module.exports = {
   MODEL_VERSION,
   PROMPT_VERSION,
   analyzeEvidence,
+  // 以下是給 services/agent/analyzeLlm.js 重用的既有確定性邏輯（安全過濾／單位驗證／
+  // 跨文件 heuristic／缺件偵測）——LLM 版本只替換「怎麼從文件文字抽出 raw 候選欄位」
+  // 這一步，其餘全部沿用同一套已測試過的程式碼，不重寫、不重複維護兩份邏輯。
+  decodeEvidence,
+  containsInjection,
+  normalizeEntry,
+  missingEvidenceFindings,
+  evaluateHeuristic,
+  DEMO_HEURISTICS,
+  SAFE_SOURCE_FILE,
+  SAFE_SOURCE_LABEL,
 };
