@@ -1,0 +1,947 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Day 2 Workflow API Examples",
+  "description": "Machine-readable examples aligned with server/workflowApi.js. Grant plaintext tokens are masked. No real secrets.",
+  "baseUrl": "http://127.0.0.1:3847",
+  "demoActors": {
+    "Supplier": {
+      "actorId": "demo-supplier-001",
+      "orgId": "ORG-TW-STEEL-SUPPLIER",
+      "role": "Supplier",
+      "demoOnly": true
+    },
+    "Importer": {
+      "actorId": "demo-importer-001",
+      "orgId": "ORG-EU-IMPORTER-DEMO",
+      "role": "Importer",
+      "demoOnly": true
+    },
+    "Verifier": {
+      "actorId": "demo-verifier-001",
+      "orgId": "ORG-CBAM-VERIFIER-DEMO",
+      "role": "Verifier",
+      "demoOnly": true
+    }
+  },
+  "fixedCaseId": "CASE-2026-001",
+  "carbonPreviewContract": {
+    "previewOnly": true,
+    "clientSuppliedInput": true,
+    "persistence": "回應僅供預覽，不寫入 workflow case 或 carbon store。"
+  },
+  "examples": [
+    {
+      "id": "auth_missing_role",
+      "description": "未指定 Demo 角色",
+      "request": {
+        "method": "GET",
+        "path": "/api/cases",
+        "headers": {}
+      },
+      "response": {
+        "status": 401,
+        "body": {
+          "code": "DEMO_ROLE_REQUIRED",
+          "message": "請使用 x-demo-role header 或 demoRole query 選擇 Supplier、Importer 或 Verifier。",
+          "retryable": false,
+          "details": {
+            "demoOnly": true
+          }
+        }
+      }
+    },
+    {
+      "id": "cases_list_supplier",
+      "description": "Supplier 取得案件列表（摘要遮罩）",
+      "request": {
+        "method": "GET",
+        "path": "/api/cases",
+        "headers": {
+          "x-demo-role": "Supplier"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "actor": {
+            "actorId": "demo-supplier-001",
+            "orgId": "ORG-TW-STEEL-SUPPLIER",
+            "role": "Supplier",
+            "demoOnly": true
+          },
+          "cases": [
+            {
+              "caseId": "CASE-2026-001",
+              "title": "TW-STEEL-01 2026 年度示範案件",
+              "cnCode": "72085100",
+              "status": "DRAFT",
+              "createdAt": "2026-08-24T09:00:00Z",
+              "policyProfileId": "CBAM-STEEL-2026-v1",
+              "readiness": "not_verified",
+              "readyDisclaimer": "具備送交查驗準備條件，不代表正式查驗完成。",
+              "demoOnly": true,
+              "evidenceCount": 0,
+              "reportingYear": 2026
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "evidence_upload_success",
+      "description": "Supplier 上傳 synthetic Demo evidence（回應不含 contentBase64）",
+      "request": {
+        "method": "POST",
+        "path": "/api/evidence",
+        "headers": {
+          "x-demo-role": "Supplier",
+          "content-type": "application/json"
+        },
+        "body": {
+          "caseId": "CASE-2026-001",
+          "filename": "demo-electricity-2026.txt",
+          "mediaType": "text/plain",
+          "contentBase64": "c3ludGhldGljIGVsZWN0cmljaXR5IGV2aWRlbmNlIDIwMjY=",
+          "metadata": {
+            "type": "electricity_bill",
+            "coveredFrom": "2026-01-01",
+            "coveredTo": "2026-12-31",
+            "source": "synthetic-demo-electricity_bill"
+          }
+        }
+      },
+      "response": {
+        "status": 201,
+        "body": {
+          "evidence": {
+            "evidenceId": "EV-UPLOAD-01",
+            "caseId": "CASE-2026-001",
+            "type": "electricity_bill",
+            "fileHash": "sha256:8f4e3c2b1a0d9e8f7c6b5a49382716050493827160504938271605049382716",
+            "coveredFrom": "2026-01-01",
+            "coveredTo": "2026-12-31",
+            "source": "synthetic-demo-electricity_bill",
+            "version": 1,
+            "humanConfirmed": false,
+            "mediaType": "text/plain",
+            "sizeBytes": 38,
+            "filename": "demo-electricity-2026.txt",
+            "vaultRef": "vault-demo://CASE-2026-001/<hash-prefix>"
+          }
+        },
+        "notes": [
+          "fileHash 為示意；實際值依 contentBase64 的 SHA-256 計算。",
+          "回應 deliberately 省略 contentBase64。"
+        ]
+      }
+    },
+    {
+      "id": "evidence_duplicate_filename",
+      "description": "同名文件不可靜默覆寫",
+      "request": {
+        "method": "POST",
+        "path": "/api/evidence",
+        "headers": {
+          "x-demo-role": "Supplier",
+          "content-type": "application/json"
+        },
+        "body": {
+          "caseId": "CASE-2026-001",
+          "filename": "demo-electricity-2026.txt",
+          "mediaType": "text/plain",
+          "contentBase64": "cmVwbGFjZW1lbnQ=",
+          "metadata": {
+            "type": "electricity_bill",
+            "coveredFrom": "2026-01-01",
+            "coveredTo": "2026-12-31",
+            "source": "demo"
+          }
+        }
+      },
+      "response": {
+        "status": 409,
+        "body": {
+          "code": "EVIDENCE_ALREADY_EXISTS",
+          "message": "同名文件已存在；Demo Vault 不會靜默覆寫。",
+          "retryable": false,
+          "details": {
+            "existingEvidenceId": "EV-UPLOAD-01"
+          }
+        }
+      }
+    },
+    {
+      "id": "evidence_media_type_rejected",
+      "description": "不允許的 mediaType",
+      "request": {
+        "method": "POST",
+        "path": "/api/evidence",
+        "headers": {
+          "x-demo-role": "Supplier",
+          "content-type": "application/json"
+        },
+        "body": {
+          "caseId": "CASE-2026-001",
+          "filename": "malware.exe",
+          "mediaType": "application/x-msdownload",
+          "contentBase64": "bm90LWV4ZWN1dGFibGU=",
+          "metadata": {
+            "type": "fuel_ledger",
+            "coveredFrom": "2026-01-01",
+            "coveredTo": "2026-12-31",
+            "source": "demo"
+          }
+        }
+      },
+      "response": {
+        "status": 400,
+        "body": {
+          "code": "MEDIA_TYPE_NOT_ALLOWED",
+          "message": "此文件類型不在允許清單。",
+          "retryable": false,
+          "details": {
+            "allowedMediaTypes": [
+              "application/pdf",
+              "application/json",
+              "text/plain",
+              "image/png",
+              "image/jpeg"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "evidence_confirm_success",
+      "description": "Supplier 人工確認 evidence",
+      "request": {
+        "method": "POST",
+        "path": "/api/evidence/EV-UPLOAD-01/confirm",
+        "headers": {
+          "x-demo-role": "Supplier",
+          "content-type": "application/json"
+        },
+        "body": {
+          "confirmed": true
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "evidence": {
+            "evidenceId": "EV-UPLOAD-01",
+            "humanConfirmed": true,
+            "filename": "demo-electricity-2026.txt",
+            "vaultRef": "vault-demo://CASE-2026-001/<hash-prefix>"
+          }
+        }
+      }
+    },
+    {
+      "id": "case_submit_missing_evidence",
+      "description": "缺件或未確認時提交",
+      "request": {
+        "method": "POST",
+        "path": "/api/cases/CASE-2026-001/submit",
+        "headers": {
+          "x-demo-role": "Supplier",
+          "content-type": "application/json"
+        },
+        "body": {}
+      },
+      "response": {
+        "status": 422,
+        "body": {
+          "code": "EVIDENCE_MISSING",
+          "message": "案件仍有缺件或尚未人工確認的證據。",
+          "retryable": false,
+          "details": {
+            "missingTypes": [
+              "fuel_ledger",
+              "production_report",
+              "precursor_list"
+            ],
+            "unconfirmedEvidenceIds": []
+          }
+        }
+      }
+    },
+    {
+      "id": "case_submit_success_method_review",
+      "description": "四份 evidence 齊全且已確認；Agent/Proof/Gate 仍 unavailable → METHOD_REVIEW",
+      "preconditions": [
+        "四種 required evidence 已上傳且 humanConfirmed=true"
+      ],
+      "request": {
+        "method": "POST",
+        "path": "/api/cases/CASE-2026-001/submit",
+        "headers": {
+          "x-demo-role": "Supplier",
+          "content-type": "application/json"
+        },
+        "body": {}
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "case": {
+            "caseId": "CASE-2026-001",
+            "status": "METHOD_REVIEW",
+            "readiness": "not_verified",
+            "demoOnly": true,
+            "carbon": {
+              "annual": {
+                "emissions": 360,
+                "emissionsUnit": "tCO2e",
+                "intensity": 1.8,
+                "intensityUnit": "tCO2e/tonne"
+              },
+              "shipments": [
+                {
+                  "shipmentId": "SHIP-A",
+                  "allocatedEmissions": 180,
+                  "allocationStatus": "METHOD_REVIEW"
+                },
+                {
+                  "shipmentId": "SHIP-B",
+                  "allocatedEmissions": 108,
+                  "allocationStatus": "METHOD_REVIEW"
+                }
+              ],
+              "demoOnly": true
+            },
+            "services": {
+              "agent": {
+                "status": "unavailable",
+                "verification": "not_verified",
+                "demoOnly": true
+              },
+              "proof": {
+                "status": "unavailable",
+                "verification": "not_verified",
+                "checks": [],
+                "reasonCodes": ["PROOF_SERVICE_UNAVAILABLE"],
+                "demoOnly": true
+              },
+              "gate": {
+                "status": "unavailable",
+                "verification": "not_verified",
+                "checks": [],
+                "reasonCodes": ["GATE_SERVICE_UNAVAILABLE"],
+                "demoOnly": true
+              }
+            }
+          },
+          "readiness": {
+            "status": "METHOD_REVIEW",
+            "readiness": "not_verified",
+            "reasonCodes": ["SERVICE_UNAVAILABLE"],
+            "message": "Proof 或 Gate 尚未驗證，因此案件維持 METHOD_REVIEW。"
+          }
+        },
+        "notes": [
+          "當 proof+gate 皆 available+verified 時（8/26 trust engine），同一路徑或 revalidate 才可能 READY_FOR_VERIFIER。Agent 可不接。"
+        ]
+      }
+    },
+    {
+      "id": "importer_summary_masked",
+      "description": "Importer 摘要：無 vaultRef、contentBase64、完整 Supplier 底稿",
+      "request": {
+        "method": "GET",
+        "path": "/api/importer/cases/CASE-2026-001/summary",
+        "headers": {
+          "x-demo-role": "Importer"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "case": {
+            "caseId": "CASE-2026-001",
+            "cnCode": "72085100",
+            "status": "METHOD_REVIEW",
+            "annualSummary": {
+              "emissions": 360,
+              "emissionsUnit": "tCO2e",
+              "intensity": 1.8,
+              "intensityUnit": "tCO2e/tonne"
+            },
+            "shipments": [
+              {
+                "shipmentId": "SHIP-A",
+                "quantityTonnes": 100,
+                "quantityUnit": "tonne",
+                "allocatedEmissions": 180,
+                "allocationStatus": "METHOD_REVIEW"
+              }
+            ],
+            "evidenceCompleteness": {
+              "required": [
+                "electricity_bill",
+                "fuel_ledger",
+                "production_report",
+                "precursor_list"
+              ],
+              "received": [
+                "electricity_bill",
+                "fuel_ledger",
+                "production_report",
+                "precursor_list"
+              ],
+              "confirmedCount": 4
+            },
+            "evidence": [
+              {
+                "evidenceId": "EV-UPLOAD-01",
+                "type": "electricity_bill",
+                "fileHash": "sha256:<redacted>",
+                "humanConfirmed": true
+              }
+            ]
+          },
+          "comparison": {
+            "actualIntensity": 1.8,
+            "defaultEstimateIntensity": 2.5,
+            "unit": "tCO2e/tonne",
+            "label": "Demo estimate，非官方預設值。",
+            "demoOnly": true
+          }
+        },
+        "forbiddenResponseFields": [
+          "vaultRef",
+          "contentBase64",
+          "installationYear",
+          "token",
+          "calculationReceipt",
+          "totalEmissionsScaled",
+          "sourceHash"
+        ]
+      }
+    },
+    {
+      "id": "verifier_evidence_index",
+      "description": "Verifier Evidence Index（含 filename，不含 content）",
+      "request": {
+        "method": "GET",
+        "path": "/api/verifier/cases/CASE-2026-001/evidence",
+        "headers": {
+          "x-demo-role": "Verifier"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "caseId": "CASE-2026-001",
+          "evidenceIndex": [
+            {
+              "evidenceId": "EV-UPLOAD-01",
+              "type": "electricity_bill",
+              "filename": "demo-electricity-2026.txt",
+              "fileHash": "sha256:<redacted>",
+              "humanConfirmed": true
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "vault_grant_create",
+      "description": "Supplier 建立短效 Grant；plaintext token 僅此回應出現一次",
+      "request": {
+        "method": "POST",
+        "path": "/api/vault/grants",
+        "headers": {
+          "x-demo-role": "Supplier",
+          "content-type": "application/json"
+        },
+        "body": {
+          "caseId": "CASE-2026-001",
+          "evidenceIds": [
+            "EV-UPLOAD-01"
+          ],
+          "subject": "demo-verifier-001",
+          "expiresAt": "2026-08-25T12:05:00.000Z"
+        }
+      },
+      "response": {
+        "status": 201,
+        "body": {
+          "grant": {
+            "grantId": "grant_0001",
+            "caseId": "CASE-2026-001",
+            "evidenceIds": [
+              "EV-UPLOAD-01"
+            ],
+            "subjectActorId": "demo-verifier-001",
+            "expiresAt": "2026-08-25T12:05:00.000Z",
+            "oneTime": true,
+            "demoOnly": true
+          },
+          "token": "<REDACTED_ONE_TIME_GRANT_TOKEN>"
+        },
+        "notes": [
+          "grant 物件不含 tokenHash。",
+          "Audit 事件 VAULT_GRANT_CREATE 不記錄 token。"
+        ]
+      }
+    },
+    {
+      "id": "vault_open_success",
+      "description": "Verifier 使用有效 Grant 開啟底稿一次",
+      "request": {
+        "method": "GET",
+        "path": "/api/vault/items/EV-UPLOAD-01",
+        "headers": {
+          "x-demo-role": "Verifier",
+          "x-vault-token": "<REDACTED_ONE_TIME_GRANT_TOKEN>"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "evidence": {
+            "evidenceId": "EV-UPLOAD-01",
+            "type": "electricity_bill",
+            "filename": "demo-electricity-2026.txt",
+            "contentBase64": "c3ludGhldGljIGVsZWN0cmljaXR5IGV2aWRlbmNlIDIwMjY="
+          },
+          "access": {
+            "mode": "open",
+            "oneTime": true,
+            "consumedAt": "2026-08-25T12:03:10.000Z",
+            "demoOnly": true
+          }
+        }
+      }
+    },
+    {
+      "id": "vault_open_denied_importer",
+      "description": "Importer 即使持有 token 仍被拒絕",
+      "request": {
+        "method": "GET",
+        "path": "/api/vault/items/EV-UPLOAD-01",
+        "headers": {
+          "x-demo-role": "Importer",
+          "x-vault-token": "<REDACTED_ONE_TIME_GRANT_TOKEN>"
+        }
+      },
+      "response": {
+        "status": 403,
+        "body": {
+          "code": "GRANT_INVALID",
+          "message": "Grant 無效、已使用或不符合此底稿。",
+          "retryable": false,
+          "details": null
+        }
+      }
+    },
+    {
+      "id": "vault_open_denied_reuse",
+      "description": "一次性 Grant 已消耗後重用",
+      "request": {
+        "method": "GET",
+        "path": "/api/vault/items/EV-UPLOAD-01/download",
+        "headers": {
+          "x-demo-role": "Verifier",
+          "x-vault-token": "<REDACTED_ONE_TIME_GRANT_TOKEN>"
+        }
+      },
+      "response": {
+        "status": 403,
+        "body": {
+          "code": "GRANT_INVALID",
+          "message": "Grant 無效、已使用或不符合此底稿。",
+          "retryable": false,
+          "details": null
+        }
+      }
+    },
+    {
+      "id": "vault_download_success",
+      "description": "Verifier 使用有效 Grant 下載底稿一次（消耗 Grant）",
+      "request": {
+        "method": "GET",
+        "path": "/api/vault/items/EV-UPLOAD-01/download",
+        "headers": {
+          "x-demo-role": "Verifier",
+          "x-vault-token": "<REDACTED_ONE_TIME_GRANT_TOKEN>"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "evidence": {
+            "evidenceId": "EV-UPLOAD-01",
+            "type": "electricity_bill",
+            "filename": "demo-electricity-2026.txt",
+            "contentBase64": "c3ludGhldGljIGVsZWN0cmljaXR5IGV2aWRlbmNlIDIwMjY="
+          },
+          "access": {
+            "mode": "download",
+            "oneTime": true,
+            "consumedAt": "2026-08-25T12:03:15.000Z",
+            "demoOnly": true
+          }
+        }
+      }
+    },
+    {
+      "id": "vault_grant_revoke",
+      "description": "Supplier 撤銷 Grant",
+      "request": {
+        "method": "POST",
+        "path": "/api/vault/grants/grant_0002/revoke",
+        "headers": {
+          "x-demo-role": "Supplier",
+          "content-type": "application/json"
+        },
+        "body": {}
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "grantId": "grant_0002",
+          "revoked": true,
+          "revokedAt": "2026-08-25T12:04:00.000Z"
+        }
+      }
+    },
+    {
+      "id": "verifier_finding_create",
+      "description": "Verifier 記錄結構化 finding（不代表正式查驗完成）",
+      "request": {
+        "method": "POST",
+        "path": "/api/verifier/cases/CASE-2026-001/findings",
+        "headers": {
+          "x-demo-role": "Verifier",
+          "content-type": "application/json"
+        },
+        "body": {
+          "summary": "請補充來源說明。",
+          "severity": "warning"
+        }
+      },
+      "response": {
+        "status": 201,
+        "body": {
+          "finding": {
+            "findingId": "finding_0001",
+            "caseId": "CASE-2026-001",
+            "summary": "請補充來源說明。",
+            "severity": "warning",
+            "status": "open",
+            "createdBy": "demo-verifier-001",
+            "demoOnly": true
+          }
+        }
+      }
+    },
+    {
+      "id": "carbon_preview_unknown_unit",
+      "description": "碳排預覽：未知單位",
+      "request": {
+        "method": "POST",
+        "path": "/api/workflow/carbon/preview",
+        "headers": {
+          "x-demo-role": "Supplier",
+          "content-type": "application/json"
+        },
+        "body": {
+          "caseId": "CASE-2026-001",
+          "installationYear": {
+            "installationId": "TW-STEEL-01",
+            "operatorOrgId": "ORG-TW-STEEL-SUPPLIER",
+            "reportingYear": 2026,
+            "productionRoute": "basic-oxygen-furnace-demo",
+            "systemBoundaryVersion": "demo-v0",
+            "productionTonnes": 200,
+            "verifiedIntensity": 1.8,
+            "verificationStatus": "confirmed",
+            "productionUnit": "kg"
+          }
+        }
+      },
+      "response": {
+        "status": 422,
+        "body": {
+          "code": "UNKNOWN_UNIT",
+          "message": "碳排核心拒絕這組輸入。",
+          "retryable": false,
+          "details": {
+            "reasonCode": "UNKNOWN_UNIT"
+          }
+        }
+      }
+    },
+    {
+      "id": "carbon_preview_allocation_exceeds",
+      "description": "碳排預覽：超額分攤",
+      "request": {
+        "method": "POST",
+        "path": "/api/workflow/carbon/preview",
+        "headers": {
+          "x-demo-role": "Supplier",
+          "content-type": "application/json"
+        },
+        "body": {
+          "caseId": "CASE-2026-001",
+          "installationYear": {
+            "installationId": "TW-STEEL-01",
+            "operatorOrgId": "ORG-TW-STEEL-SUPPLIER",
+            "reportingYear": 2026,
+            "productionRoute": "basic-oxygen-furnace-demo",
+            "systemBoundaryVersion": "demo-v0",
+            "productionTonnes": 200,
+            "verifiedIntensity": 1.8,
+            "verificationStatus": "confirmed",
+            "productionUnit": "tonne"
+          },
+          "shipments": [
+            {
+              "shipmentId": "SHIP-A",
+              "caseId": "CASE-2026-001",
+              "installationId": "TW-STEEL-01",
+              "reportingYear": 2026,
+              "quantityTonnes": 150,
+              "quantityUnit": "tonne",
+              "factorSetId": "CBAM-DEMO-2026-v1"
+            },
+            {
+              "shipmentId": "SHIP-B",
+              "caseId": "CASE-2026-001",
+              "installationId": "TW-STEEL-01",
+              "reportingYear": 2026,
+              "quantityTonnes": 60,
+              "quantityUnit": "tonne",
+              "factorSetId": "CBAM-DEMO-2026-v1"
+            }
+          ]
+        }
+      },
+      "response": {
+        "status": 422,
+        "body": {
+          "code": "ALLOCATION_EXCEEDS_PRODUCTION",
+          "message": "批次分攤未通過碳排核心檢查。",
+          "retryable": false,
+          "details": {
+            "shipmentId": "SHIP-B",
+            "reasonCodes": [
+              "ALLOCATION_EXCEEDS_PRODUCTION"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "workflow_revalidate_method_review",
+      "description": "預設 trust adapter unavailable → METHOD_REVIEW",
+      "preconditions": [
+        "案件已 submit；carbon 含 calculationReceipt.inputHash"
+      ],
+      "request": {
+        "method": "POST",
+        "path": "/api/workflow/revalidate",
+        "headers": {
+          "x-demo-role": "Supplier",
+          "content-type": "application/json"
+        },
+        "body": {}
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "case": {
+            "caseId": "CASE-2026-001",
+            "status": "METHOD_REVIEW",
+            "readiness": "not_verified",
+            "services": {
+              "agent": { "status": "unavailable", "verification": "not_verified" },
+              "proof": {
+                "status": "unavailable",
+                "verification": "not_verified",
+                "reasonCodes": ["PROOF_SERVICE_UNAVAILABLE"]
+              },
+              "gate": {
+                "status": "unavailable",
+                "verification": "not_verified",
+                "reasonCodes": ["GATE_SERVICE_UNAVAILABLE"]
+              }
+            }
+          },
+          "readiness": {
+            "status": "METHOD_REVIEW",
+            "readiness": "not_verified",
+            "reasonCodes": ["SERVICE_UNAVAILABLE"],
+            "message": "Proof 或 Gate 尚未驗證，因此案件維持 METHOD_REVIEW。"
+          },
+          "demoOnly": true
+        }
+      }
+    },
+    {
+      "id": "workflow_revalidate_ready",
+      "description": "8/26 trust engine 接妥後：proof+gate verified → READY（Agent 可不接）",
+      "preconditions": [
+        "trustAdapter evaluator 回 available+verified",
+        "四份 evidence 已確認"
+      ],
+      "request": {
+        "method": "POST",
+        "path": "/api/workflow/revalidate",
+        "headers": {
+          "x-demo-role": "Supplier",
+          "content-type": "application/json"
+        },
+        "body": {}
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "case": {
+            "caseId": "CASE-2026-001",
+            "status": "READY_FOR_VERIFIER",
+            "readiness": "verified",
+            "readyDisclaimer": "具備送交查驗準備條件，不代表正式查驗完成。",
+            "services": {
+              "agent": { "status": "unavailable", "verification": "not_verified" },
+              "proof": {
+                "status": "available",
+                "verification": "verified",
+                "checks": [{ "name": "proof-contract", "status": "pass" }],
+                "reasonCodes": [],
+                "inputHash": "<calculationReceipt.inputHash>"
+              },
+              "gate": {
+                "status": "available",
+                "verification": "verified",
+                "checks": [{ "name": "policy-profile", "status": "pass" }],
+                "reasonCodes": [],
+                "inputHash": "<calculationReceipt.inputHash>"
+              }
+            }
+          },
+          "readiness": {
+            "status": "READY_FOR_VERIFIER",
+            "readiness": "verified",
+            "reasonCodes": [],
+            "message": "具備送交查驗準備條件，不代表正式查驗完成。"
+          },
+          "demoOnly": true
+        },
+        "notes": [
+          "不代表正式 CBAM 查驗或官方核准。"
+        ]
+      }
+    },
+    {
+      "id": "workflow_revalidate_forbidden",
+      "description": "非 Supplier 不可 revalidate",
+      "request": {
+        "method": "POST",
+        "path": "/api/workflow/revalidate",
+        "headers": {
+          "x-demo-role": "Importer",
+          "content-type": "application/json"
+        },
+        "body": {}
+      },
+      "response": {
+        "status": 403,
+        "body": {
+          "code": "ROLE_FORBIDDEN",
+          "message": "目前角色無權執行此案件動作。",
+          "retryable": false,
+          "details": null
+        }
+      }
+    },
+    {
+      "id": "workflow_reset",
+      "description": "重置 Demo workflow 至 DRAFT",
+      "request": {
+        "method": "POST",
+        "path": "/api/workflow/reset",
+        "headers": {
+          "x-demo-role": "Supplier",
+          "content-type": "application/json"
+        },
+        "body": {}
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "ok": true,
+          "demoOnly": true,
+          "case": {
+            "caseId": "CASE-2026-001",
+            "status": "DRAFT",
+            "readiness": "not_verified"
+          }
+        }
+      }
+    },
+    {
+      "id": "audit_timeline",
+      "description": "Audit 事件不含 token 或文件全文",
+      "request": {
+        "method": "GET",
+        "path": "/api/cases/CASE-2026-001/audit",
+        "headers": {
+          "x-demo-role": "Supplier"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "events": [
+            {
+              "auditEventId": "wf_aud_0001",
+              "timestamp": "2026-08-25T12:03:10.000Z",
+              "caseId": "CASE-2026-001",
+              "actorId": "demo-verifier-001",
+              "role": "Verifier",
+              "action": "VAULT_OPEN",
+              "targetType": "evidence",
+              "targetId": "EV-UPLOAD-01",
+              "result": "ALLOW",
+              "reasonCode": null,
+              "demoOnly": true
+            }
+          ]
+        },
+        "forbiddenAuditFields": [
+          "token",
+          "tokenHash",
+          "contentBase64"
+        ]
+      }
+    },
+    {
+      "id": "invalid_json_body",
+      "description": "無效 JSON body（index.js 層，workflow 路由亦適用）",
+      "request": {
+        "method": "POST",
+        "path": "/api/evidence",
+        "headers": {
+          "x-demo-role": "Supplier",
+          "content-type": "application/json"
+        },
+        "bodyRaw": "{\"contentBase64\":\"truncated"
+      },
+      "response": {
+        "status": 400,
+        "body": {
+          "code": "INVALID_JSON",
+          "message": "JSON request body 格式無效。",
+          "retryable": false,
+          "details": null
+        },
+        "notes": [
+          "錯誤回應不得 echo 使用者輸入片段。"
+        ]
+      }
+    }
+  ]
+}

@@ -66,6 +66,8 @@ Cloudflare Dashboard → Workers & Pages → mandate → Settings → Domains �
 | AI | 未設 `OPENAI_API_KEY` 時仍可用按鈕備援三幕 |
 | 機密 | **勿**把 API Key 寫進 `wrangler.toml`；用 `wrangler secret` |
 | Supabase | 選填、雙寫、失敗不影響 Demo；未設 `SUPABASE_URL`/`SUPABASE_SERVICE_KEY` 時完全不啟用 |
+| Day 2 身分 | `x-demo-role` 是可切換的 Demo 身分，**不是真實認證或 tenant 隔離** |
+| Day 2 資料 | 公開部署只可使用 synthetic Demo data；任何訪客都可能操作流程，正式環境須停用 Demo role 或接上真實 auth 與租戶儲存 |
 
 ## 與本地 `npm start` 差異
 
@@ -81,5 +83,7 @@ Cloudflare Dashboard → Workers & Pages → mandate → Settings → Domains �
 
 ```powershell
 npm run smoke
+npm run smoke:carbon-core
+npm run smoke:workflow
 npm run deploy:cf
 ```

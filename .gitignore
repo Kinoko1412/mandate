@@ -4,4 +4,7 @@ node_modules/
 *.log
 .DS_Store
 .wrangler/
+artifacts/
 node_modules/.cache/
+_backups/
+*.bak-*
