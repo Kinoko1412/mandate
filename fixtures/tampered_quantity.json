@@ -1,0 +1,63 @@
+{
+  "description": "【命名對齊規格 p.19 COPY PROMPT 1，但情境是 Phase 1 版詮釋，非規格 p.8 的完整定義——見下方 _interpretationNote】SHIP-A 從 100 噸竄改成 150 噸，加上 SHIP-B 60 噸，合計 210 噸超過年度可用產量 200 噸。依序分配時 SHIP-A 本身不違反任何單批次規則（150 <= 200）會先通過 allocateShipment；reconcileAllocationLedger 疊加後才發現累計超額，SHIP-B 被擋。",
+  "_interpretationNote": "規格 p.19 COPY PROMPT 1 把 tampered_quantity 列進 Phase 1（現在）要做的 4 個 fixture 之一，但 p.8『必備異常 Fixture』表對 tampered_quantity 的完整定義是『Proof 為 100 噸但 payload 改 120』→ BLOCKED/PUBLIC_INPUT_MISMATCH——這是 ZKP Proof 跟送出的 payload 兜不起來的情境，屬於 Phase 3（規格 p.19 COPY PROMPT 1 明講 Phase 1『不要做 UI、Agent 或 ZKP』）。判斷：Phase 1 目前沒有 Proof 概念，無法測 PUBLIC_INPUT_MISMATCH，改用 reconcileAllocationLedger 明確列出的拒絕條件『超出年度產量、重複 shipmentId』當作這個階段的 tampered_quantity 測試內容——用同一個檔名，先驗證『帳本層級的數量竄改被擋下』，8/26 接 ZKP 後這個檔名底下的情境會擴充成完整的 Proof/payload 不一致測試（PUBLIC_INPUT_MISMATCH）。這個判斷是我方（B，葉士愷）的決定，**尚未跟隊友（A，黃昱羲）確認過**，是隊長裁示『先照這個推測去做』，但要求之後寫工作小結報告時明確讓隊友知道我們對 tampered_quantity 這個 fixture 名稱的解讀跟規格 p.8 原文定義不同——這件事還沒真的傳達給隊友，只是先動工。",
+  "case": {
+    "caseId": "CASE-2026-001",
+    "title": "TW-STEEL-01 2026 年度示範案件（數量竄改版）",
+    "supplierOrgId": "ORG-TW-STEEL-SUPPLIER",
+    "importerOrgId": "ORG-EU-IMPORTER-DEMO",
+    "cnCode": "72085100",
+    "status": "BLOCKED",
+    "createdAt": "2026-08-24T09:00:00Z",
+    "policyProfileId": "CBAM-STEEL-2026-v1"
+  },
+  "installationYear": {
+    "installationId": "TW-STEEL-01",
+    "operatorOrgId": "ORG-TW-STEEL-SUPPLIER",
+    "reportingYear": 2026,
+    "productionRoute": "basic-oxygen-furnace-demo",
+    "systemBoundaryVersion": "demo-v0-待與碳專家確認",
+    "productionTonnes": 200,
+    "verifiedIntensity": 1.80,
+    "verificationStatus": "confirmed",
+    "productionUnit": "tonne",
+    "intensityUnit": "tCO2e/tonne",
+    "evidenceCoverage": { "periodStart": "2026-01-01", "periodEnd": "2026-12-31" },
+    "evidenceRefs": ["EV-ELEC-01", "EV-FUEL-01", "EV-PROD-01", "EV-PRECURSOR-01"],
+    "demoOnly": true
+  },
+  "evidenceItems": [
+    { "evidenceId": "EV-ELEC-01", "caseId": "CASE-2026-001", "type": "electricity_bill", "fileHash": "sha256:normal-elec", "coveredFrom": "2026-01-01", "coveredTo": "2026-12-31", "source": "utility-provider-demo", "version": 1, "humanConfirmed": true, "vaultRef": "vault-demo://CASE-2026-001/EV-ELEC-01" },
+    { "evidenceId": "EV-FUEL-01", "caseId": "CASE-2026-001", "type": "fuel_ledger", "fileHash": "sha256:normal-fuel", "coveredFrom": "2026-01-01", "coveredTo": "2026-12-31", "source": "fuel-supplier-demo", "version": 1, "humanConfirmed": true, "vaultRef": "vault-demo://CASE-2026-001/EV-FUEL-01" },
+    { "evidenceId": "EV-PROD-01", "caseId": "CASE-2026-001", "type": "production_report", "fileHash": "sha256:normal-prod", "coveredFrom": "2026-01-01", "coveredTo": "2026-12-31", "source": "internal-mes-demo", "version": 1, "humanConfirmed": true, "vaultRef": "vault-demo://CASE-2026-001/EV-PROD-01" },
+    { "evidenceId": "EV-PRECURSOR-01", "caseId": "CASE-2026-001", "type": "precursor_list", "fileHash": "sha256:normal-precursor", "coveredFrom": "2026-01-01", "coveredTo": "2026-12-31", "source": "procurement-demo", "version": 1, "humanConfirmed": true, "vaultRef": "vault-demo://CASE-2026-001/EV-PRECURSOR-01" }
+  ],
+  "shipments": [
+    { "shipmentId": "SHIP-A", "caseId": "CASE-2026-001", "installationId": "TW-STEEL-01", "reportingYear": 2026, "quantityTonnes": 150, "allocatedEmissions": 270, "allocationStatus": "READY_FOR_VERIFIER", "quantityUnit": "tonne", "factorSetId": "CBAM-DEMO-2026-v1", "_note": "原本 Demo 值是 100 噸，這裡竄改成 150 噸" },
+    { "shipmentId": "SHIP-B", "caseId": "CASE-2026-001", "installationId": "TW-STEEL-01", "reportingYear": 2026, "quantityTonnes": 60, "allocatedEmissions": null, "allocationStatus": "BLOCKED", "quantityUnit": "tonne", "factorSetId": "CBAM-DEMO-2026-v1" }
+  ],
+  "factorSet": {
+    "factorSetId": "CBAM-DEMO-2026-v1",
+    "issuer": "demo-authority",
+    "purpose": "CBAM_ACTUAL",
+    "version": "1",
+    "effectiveFrom": "2026-01-01",
+    "effectiveTo": null,
+    "sourceHash": "sha256:demo-factorset-v1",
+    "status": "active",
+    "demoOnly": true
+  },
+  "policyProfile": {
+    "policyProfileId": "CBAM-STEEL-2026-v1",
+    "cnCodes": ["72085100"],
+    "reportingYear": 2026,
+    "allowedFactorSets": ["CBAM-DEMO-2026-v1"],
+    "requiredEvidence": ["electricity_bill", "fuel_ledger", "production_report", "precursor_list"],
+    "circuitId": null,
+    "status": "active"
+  },
+  "expected": [
+    { "shipmentId": "SHIP-A", "decision": "GATE_OK", "reasonCodes": ["GATE_OK"], "allocatedEmissions": 270, "note": "單獨 150 噸沒超過 200 噸上限，單批次規則本身合法通過 allocateShipment" },
+    { "shipmentId": "SHIP-B", "decision": "BLOCKED", "reasonCodes": ["ALLOCATION_EXCEEDS_PRODUCTION"], "note": "150+60=210 > 年度產量 200，reconcileAllocationLedger 疊加後擋下" }
+  ]
+}

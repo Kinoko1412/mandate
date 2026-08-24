@@ -1,98 +1,183 @@
-# Mandate — 碳數據信任閘門 Agent（V1）
+# Mandate — 可信碳排證據 Agent（Hackathon Prototype）
 
-可信 AI 黑客松 2026 PoC：Agent 可代為**索取實際嵌入排放**、經**品質閘**入庫；**寫入 CBAM 草稿必須人類核准**；全程稽核；資料分享可撤銷且撤銷後不可用。
+**產品定位（2026-08-27）**：協助台灣鋼鐵供應商與歐盟進口商，在**正式 CBAM 查驗／申報前**，把工廠年度排放、批次分攤、佐證文件與限時授權整理成可追溯的**證據案件**（Demo Prototype，**非**官方 Registry、**非**法定查驗完成）。
 
-權限**不靠模型記住**——唯一放行點是 `PolicyEngine.evaluate`（見 `docs/trust/POLICY_SPEC.md`）。
+- **我們是**：申報前證據準備與風險預審協作層、確定性 carbon-core 計算、Demo Vault 與三角色工作流、Trust Engine（demo commitment + policy/factor gate）、**Evidence Agent 規則引擎預審**（無 LLM）、**四幕 Demo 控制台**。
+- **我們不是**：政府／海關、CBAM Registry、法定第三方查驗機構、已由 ZKP／LLM Agent／Gate **正式驗證**的商用產品。
 
-**一句話**：索取實際嵌入排放 → 品質閘 → 人類確認才寫入 CBAM 草稿 → audit；撤銷後不可用。
+**Git（Day 4）**：分支 `feature/agent-demo-integration`；runtime commits `b4a8bef`、`635baf7`、`9b2e6ab`、`b712df2`；影像 `c1d4ec6`（git 記錄日 **2026-08-24～25**）。Draft PR [#6](https://github.com/1qaz0726-star/mandate/pull/6) 為對 **`main` 的累積型 Draft PR**，已含 Day 1–4 commits；PR #3／#4／#5 亦 target `main` 且內容已涵蓋（#4 `55ac373` ≈ PR6 `b4a8bef`），**均未 merge**——8/28 建議 review/merge **#6** 並關閉舊 PR。
 
-## 快速啟動
+**部署**：https://mandate.1qaz0726.workers.dev · Cloudflare Version ID `6178232c-8ebf-4d0a-ab0f-814af9719ee0`（部署日 git 記錄 **2026-08-24～25**；**僅 synthetic data**）。
+
+Day 4 交棒：[`docs/handoff/DAY4_WORK_SUMMARY_20260827.md`](docs/handoff/DAY4_WORK_SUMMARY_20260827.md) · [`PHASE4_SESSION_LOG.md`](docs/handoff/PHASE4_SESSION_LOG.md) · 四幕腳本 [`docs/demo/DAY4_FOUR_ACT_DEMO.md`](docs/demo/DAY4_FOUR_ACT_DEMO.md)
+
+---
+
+## 快速啟動（Day 4 主線）
 
 ```bash
 cd mandate
 npm start
 ```
 
-瀏覽器開啟 [http://127.0.0.1:3847/](http://127.0.0.1:3847/)
+瀏覽器開啟 [http://127.0.0.1:3847/](http://127.0.0.1:3847/) — **Root UI**：三角色工作流 + **四幕 Demo 控制台** + Evidence Agent + Trust 重驗。
 
-### 可選：接語言模型（API Key）— **Demo 主線建議開啟**
+### 四幕操作（約 4 分鐘）
 
-```bash
-cd mandate
-copy .env.example .env
-# 編輯 .env，填入 OPENAI_API_KEY=sk-...
-npm start
-```
+| 幕 | 操作 | 預期 |
+|----|------|------|
+| **1 正常** | Supplier →「一鍵執行正常案件」 | `READY_FOR_VERIFIER`（Agent 預審不參與 readiness） |
+| **2 揭露** | Grant → Importer 摘要 → Verifier 開底稿一次 | Importer 無底稿全文；token 一次性 |
+| **3 攻擊** | 三 attack 按鈕 | `BLOCKED` + reason code；正常案件不變 |
+| **4 邊界** |「展示物理真實邊界」 | `physicalRealityVerified: false` |
 
-- 支援 OpenAI 或相容端點（可設 `OPENAI_BASE_URL`、`OPENAI_MODEL`）
-- **有 Key**：按「AI 自動演三幕」— Agent 依序 索取 → 取回回覆 → 品質檢查 → 申請寫入
-- **無 Key**：降級為左欄手動備援三幕
-- 中欄可打字跟 Agent 對話；模型**只能提議**工具，放行仍走 `PolicyEngine`
-- **勿把 `.env` 提交進 git**
+逐步腳本：[`docs/demo/DAY4_FOUR_ACT_DEMO.md`](docs/demo/DAY4_FOUR_ACT_DEMO.md)
 
-### 可選：稽核紀錄雙寫進 Supabase（Audit Log 持久化）
+GIF／截圖：[`docs/handoff/screenshots/day4/`](docs/handoff/screenshots/day4/)
 
-V1 預設全記憶體、重啟即重置。若要讓稽核紀錄／核准紀錄／AI 對話跨重啟保存，可選填 `SUPABASE_URL` / `SUPABASE_SERVICE_KEY`（見 `.env.example`）：
-
-1. 到 Supabase 專案的 SQL Editor 執行 `supabase/schema.sql`（建表 + 稽核紀錄雜湊鏈防竄改）
-2. `.env` 填入 `SUPABASE_URL`、`SUPABASE_SERVICE_KEY`（service role key，僅伺服器端使用）
-3. 不裝 `@supabase/supabase-js`，直接用 `fetch` 打 PostgREST，維持零 npm 依賴；未設定時完全不啟用，不影響 Demo
-
-契約煙測：
+**驗收（無需 API Key）**
 
 ```bash
-npm run smoke          # 9 項 policy 向量
-npm run smoke:agent    # 需 Key；無 Key 則 SKIP
+npm run smoke:carbon-core      # 36
+npm run smoke:evidence-agent   # 20
+npm run smoke:workflow         # workflow 47 + UI 19 = 66
+npm run smoke:trust            # 43
+# 合計 165
 ```
 
-## Demo 三幕（畫面上按「AI 自動演三幕」）
+**環境變數**：Day 4 主線 **無新增**；`.env.example` 僅供 legacy 三幕可選功能。
 
-1. Agent 向無證零件行索取 → 取回 → 品質檢查 → `DENY_CONSTRAINT` / `POL-CARB-001`
-2. Agent 向青禾索取 → 入庫 → `submit_cbam_draft` → `PENDING_HUMAN` / `POL-HITL-010` → 人類核准
-3. 撤銷分享 → Agent 再申請寫入 → `DENY_REVOKED` / `POL-REV-010`
+---
 
-另：**供應商自查** Tab 可貼 JSON 檢查能不能交；核准後可**匯出給客戶的回覆草稿**。
+## Day 4 Root UI
 
-逐步話術見 [`docs/DEMO_SCRIPT.md`](docs/DEMO_SCRIPT.md)。
+| 項目 | 說明 |
+|------|------|
+| 入口 | `public/index.html` |
+| 固定案件 | `CASE-2026-001`（TW-STEEL-01 / 2026） |
+| 角色切換 | header `x-demo-role`（**Demo 身分，非真實 auth**） |
+| 四幕控制台 | `#run-act-1`／`#run-act-2`／attack 三按鈕／`#run-act-4` |
+| Evidence Agent | `#run-agent-analysis` → `POST /api/cases/:id/agent/analyze`（**rule engine，無 LLM**） |
+| Trust 重驗 | `#revalidate-trust` → `POST /api/workflow/revalidate` |
+| Supplier | synthetic evidence、確認、提交、Agent 預審、Grant |
+| Importer | 摘要、**agentSafeSummary**（非 RiskReport 全文）、actual vs default **2.5**（Demo estimate） |
+| Verifier | Evidence Index、一次性 token 開啟／**download**、findings |
+| 信任文案 | `READY_FOR_VERIFIER` = 送查準備，**≠** 正式查驗或官方核准 |
+
+公開部署（含 Workers URL）**只允許 synthetic data**；任何人可切換角色／reset——正式環境須停用或接真實 auth。
+
+API 範例：[`docs/handoff/DAY4_API_EXAMPLES.json`](docs/handoff/DAY4_API_EXAMPLES.json)
+
+測試清單：[`docs/handoff/DAY4_TEST_CASES.md`](docs/handoff/DAY4_TEST_CASES.md)
+
+---
+
+## Evidence Agent（`services/agent/` + `server/agentAdapter.js`）
+
+確定性 **rule engine**（`demo-rule-based-no-llm-v1`），**不是 LLM**：
+
+- 證據解析：`application/json` 走 **JSON parser**（`JSON.parse` → `entries`／`pages[].entries`）；非 JSON 或 JSON 失敗時走固定 **`key=value;`** 分號行 **text parser**（`field=…;value=…;unit=…;page=…`）。無 OCR／外部模型。
+- 輸出 canonical `RiskReport`：entries、findings、missingEvidence、heuristics。
+- Injection sandbox、DoS caps；低信心高影響值不 eligible。
+- Workflow 整合：`execution=executed`，`verification=not_verified`——**不修改** case status／proof／gate readiness。
+- Importer 只看 `agentSafeSummary`；audit 僅 reportId／counts／reasonCodes。
+
+測試：`npm run smoke:evidence-agent`（**20** 項）。
+
+---
+
+## Trust Engine（`services/proof` + `factor-registry` + `policy-registry` + `policy-gate`）
+
+`server/trustAdapter.js` production evaluator：normal fixture 經 revalidate → `READY_FOR_VERIFIER`；攻擊 fixture → `BLOCKED`／`NEEDS_EVIDENCE`。
+
+> **⚠️ 不是 zk-SNARK。** `ProofEnvelope.proof` = `demoOnly:sha256:` **hash commitment**（規格 cut plan fallback）。現場重算 + `crypto.timingSafeEqual`；`cryptographic_proof` check 永遠 `skipped`。
+>
+> **Nonce 邊界**：in-memory ledger；Cloudflare Workers **跨 isolate 不共享** → **不得**宣稱完整 replay protection。`setNonceLedger(adapter)` hook 供 Durable Object／KV／D1。
+>
+> **Registry**：Factor／Policy 為程式內 **寫死** Demo 清單，非官方治理。
+
+Demo attack（server-side，不寫 store）：`POST /api/demo/attack` — `tampered_quantity`／`wrong_factor`／`proof_context_swap`。
+
+測試：`npm run smoke:trust`（**43** 項）。
+
+---
+
+## Legacy 入口（舊版 PCF 三幕）
+
+[http://127.0.0.1:3847/legacy.html](http://127.0.0.1:3847/legacy.html) — 2026-07 改題前 V1；需可選 `OPENAI_API_KEY` 才跑 LLM Agent 三幕。與 carbon-core 主線**並存、互不呼叫**。
+
+---
+
+## npm scripts
+
+| Script | 用途 |
+|--------|------|
+| `npm start` | 啟動 `server/index.js`（port **3847**） |
+| `npm run smoke:carbon-core` | Phase 1 計算核心 + schema validator（**36**） |
+| `npm run smoke:evidence-agent` | Day 4 Evidence Agent（**20**） |
+| `npm run smoke:workflow` | Workflow API（**47**）+ UI 靜態契約（**19**） |
+| `npm run smoke:trust` | Trust engine（**43**） |
+| `npm run smoke:ui` | 僅 UI 靜態契約 |
+| `npm run smoke` | Legacy policy（12 vectors + 4 trace） |
+| `npm run smoke:agent` | Legacy OpenAI agent（需 Key，無 Key 則 SKIP） |
+| `npm run dev:cf` / `deploy:cf` | Cloudflare synthetic Demo（見 [`docs/DEPLOY_CLOUDFLARE.md`](docs/DEPLOY_CLOUDFLARE.md)） |
+
+---
+
+## 2026-08-23 改題後的 Carbon Core
+
+`packages/contracts/`、`services/carbon-core/`、`fixtures/` — normal Demo **360 tCO2e ÷ 200 t = 1.80**，分攤 **180／108**（`demoOnly` activities/factors）。
+
+改題記錄：`DECISIONS.md` §9。
+
+---
 
 ## 目錄
 
 | 路徑 | 說明 |
 |------|------|
-| `public/` | HTML + CSS + JS 三欄工作台 |
-| `server/` | 純 Node `http` API + policy engine |
-| `docs/trust/` | 六信任要點完整規格 |
-| `docs/STRATEGY.md` | 報名／評審敘事 |
-| `DECISIONS.md` | 已定案事項 |
+| `public/index.html` | **Day 4** 三角色 + 四幕控制台 |
+| `public/js/case-workflow.js` | 四幕一鍵、Agent、attack、Vault |
+| `services/agent/` | Evidence Agent rule engine |
+| `server/agentAdapter.js` | Agent ↔ workflow 接點 |
+| `server/trustAdapter.js` | Trust evaluate + demo attack harness |
+| `server/workflowApi.js` | Workflow + Agent + `/api/demo/*` |
+| `docs/handoff/DAY4_*` | Day 4 交棒四件套 |
+| `docs/demo/DAY4_FOUR_ACT_DEMO.md` | 四幕簡報腳本 |
+| `docs/handoff/screenshots/day4/` | GIF + PNG |
+
+---
+
+## Workflow API 摘要（Day 4）
+
+需 header `x-demo-role: Supplier|Importer|Verifier`；Vault 另需 `x-vault-token`（**不得**放 query）。
+
+**新增／Day 4 重點**
+
+- `POST /api/cases/:id/agent/analyze` · `POST /api/agent/analyze`（alias，`body.caseId`）
+- `POST /api/workflow/revalidate`（Supplier，Trust hook）
+- `POST /api/demo/attack`（Supplier，三固定 scenario）
+- `GET|POST /api/demo/physical-reality`（誠實邊界，不改 case）
+
+其餘 Day 2 路由：cases、evidence、vault、importer summary、verifier index/findings、carbon preview、reset — 見 [`DAY4_API_EXAMPLES.json`](docs/handoff/DAY4_API_EXAMPLES.json)。
+
+---
 
 ## 文件優先
 
 | 交件／規格 | 路徑 |
 |------------|------|
-| Governance Gap Memo | [`docs/trust/GOVERNANCE_GAP_MEMO.md`](docs/trust/GOVERNANCE_GAP_MEMO.md) |
-| 信任架構 | [`docs/trust/TRUST_ARCHITECTURE.md`](docs/trust/TRUST_ARCHITECTURE.md) |
-| 權限矩陣 | [`docs/trust/PERMISSION_MATRIX.md`](docs/trust/PERMISSION_MATRIX.md) |
-| Policy 契約 | [`docs/trust/POLICY_SPEC.md`](docs/trust/POLICY_SPEC.md) |
-| 資料模型 | [`docs/trust/DATA_MODEL.md`](docs/trust/DATA_MODEL.md) |
+| Day 4 小結 | [`docs/handoff/DAY4_WORK_SUMMARY_20260827.md`](docs/handoff/DAY4_WORK_SUMMARY_20260827.md) |
+| Day 4 session log | [`docs/handoff/PHASE4_SESSION_LOG.md`](docs/handoff/PHASE4_SESSION_LOG.md) |
+| 四幕 Demo | [`docs/demo/DAY4_FOUR_ACT_DEMO.md`](docs/demo/DAY4_FOUR_ACT_DEMO.md) |
+| Day 3 trust | [`docs/handoff/DAY3_TRUST_ENGINE_HANDOFF.md`](docs/handoff/DAY3_TRUST_ENGINE_HANDOFF.md) |
+| 部署 | [`docs/DEPLOY_CLOUDFLARE.md`](docs/DEPLOY_CLOUDFLARE.md) |
+| Draft PR #6 | https://github.com/1qaz0726-star/mandate/pull/6（對 **main** 累積型 Draft PR，含 Day 1–4） |
 
-`server/policy.js` 每個分支註解對應 `POL-xxx`；新增規則先改 MD 再改碼。
+---
 
-> 注意：本 README／docs 已定案為碳數據主線；若執行碼仍殘留採購付款工具名，以 **docs 為準**，改碼對齊。
+## 刻意不做（Prototype）
 
-## API 摘要
+正式 CBAM registry、碳權避險、**真正的 zk-SNARK**、**LLM Evidence Agent**、Factor/Policy **正式治理**（現為寫死 Demo）、正式 KMS/HSM、讓 LLM 自判權限、宣稱官方查驗完成或海關核准或 ZKP 已完成正式驗證。
 
-- `GET /api/session` · `GET /api/audit` · `GET /api/policies`
-- `POST /api/tools/:toolId`（`request_emissions`／`fetch_supplier_response`／`ingest_pcf_payload`／`submit_cbam_draft` 等）
-- `POST /api/agent/chat` · `POST /api/agent/demo` · `GET /api/agent/status`
-- `POST /api/check/pcf`（供應商自查，不寫 staging）
-- `GET /api/export/client-draft/:supplierId` · `GET /api/export/audit`
-- `POST /api/approvals/:id/approve` · `deny`
-- `POST /api/share/revoke`（或同等 `revoke_data_share`）
-- `POST /api/mandate/revoke` · `simulate-expiry`
-- `POST /api/reset`
-
-Port：**3847**（零 npm 依賴）。
-
-## 刻意不做（V1）
-
-真 CBAM registry／碳權避險／儀表板主軸／讓 LLM 自判權限／Agent 呼叫 `commit_cbam_draft`。
+**已知限制**：Workflow **in-memory**；`x-demo-role` **無 auth**；nonce **跨 isolate 不保證**；`READY_FOR_VERIFIER` **非核准**；Importer default **2.5** = Demo estimate；Evidence `version` 恆 `1`；部署 **僅 synthetic data**。

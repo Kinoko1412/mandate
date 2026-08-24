@@ -1,0 +1,419 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "mandate/schema-v1",
+  "title": "Mandate CBAM Canonical Data Model v1",
+  "description": "逐字對照《可信碳排證據Agent_VibeCodingAI完整工程規格與指令手冊》p.7 Canonical Data Model 的必填欄位；不得私自改名（文件 p.5 明文規定）。新增選填欄位可向後相容；刪除、改名、型別或語意變更必須升 schemaVersion（文件 p.7 版本規則）。",
+  "schemaVersion": "v1",
+  "definitions": {
+
+    "CaseStatus": {
+      "type": "string",
+      "description": "Case 狀態機（文件 p.4，7 態）",
+      "enum": ["DRAFT", "NEEDS_EVIDENCE", "METHOD_REVIEW", "READY_FOR_VERIFIER", "VERIFIER_REVIEW", "BLOCKED", "ARCHIVED"]
+    },
+
+    "GateDecision": {
+      "type": "string",
+      "description": "GateResult.decision（文件 p.11 Final Mapping）",
+      "enum": ["GATE_OK", "NEEDS_EVIDENCE", "METHOD_REVIEW", "BLOCKED"]
+    },
+
+    "ReasonCode": {
+      "type": "string",
+      "description": "見 packages/contracts/enums.js 的 REASON_CODE；後半段標 NOT IN SPEC 的是 carbon-core 自行補充，待與隊友確認命名",
+      "enum": [
+        "AUTHORIZATION_INVALID", "AUTHORIZATION_REVOKED", "CASE_CONTEXT_MISMATCH",
+        "EVIDENCE_MISSING", "EVIDENCE_PERIOD_INCOMPLETE",
+        "FACTOR_NOT_ALLOWED", "FACTOR_EXPIRED", "POLICY_NOT_APPLICABLE",
+        "PROOF_INVALID", "PROOF_EXPIRED", "NONCE_REUSED",
+        "PUBLIC_INPUT_MISMATCH", "PROOF_CONTEXT_MISMATCH", "AGENT_REVIEW_REQUIRED", "GATE_OK",
+        "ALLOCATION_EXCEEDS_PRODUCTION", "DUPLICATE_SHIPMENT_ID", "UNKNOWN_UNIT",
+        "ZERO_OR_NEGATIVE_QUANTITY", "INVALID_REPORTING_YEAR", "CALCULATION_OVERFLOW",
+        "MISSING_CALCULATION_CONTEXT", "INTENSITY_MISMATCH"
+      ]
+    },
+
+    "VerificationStatus": {
+      "type": "string",
+      "description": "NOT IN SPEC 的值域選擇——文件只給欄位名稱 verificationStatus，沒列舉值。carbon-core 定義：draft=供應商尚未確認；confirmed=供應商已確認可送 Gate。跟『合格 CBAM 查驗員正式查驗完成』是不同層次，待跟隊友確認。",
+      "enum": ["draft", "confirmed"]
+    },
+
+    "AllocationStatus": {
+      "type": "string",
+      "description": "Shipment.allocationStatus——文件只給欄位名稱，沒列舉值。carbon-core 沿用 CaseStatus 裡由 Gate 直接可達的子集。",
+      "enum": ["NEEDS_EVIDENCE", "METHOD_REVIEW", "READY_FOR_VERIFIER", "BLOCKED"]
+    },
+
+    "FactorPurpose": {
+      "type": "string",
+      "description": "落地風險審查修正版方案 p.9（本文件優先權表 p.2：Vibe Coding 規格沒定義的欄位值域，落地風險審查版補）",
+      "enum": ["TW_INVENTORY", "CBAM_ACTUAL", "CBAM_DEFAULT", "PACT"]
+    },
+
+    "EvidenceType": {
+      "type": "string",
+      "enum": ["electricity_bill", "fuel_ledger", "production_report", "precursor_list"]
+    },
+
+    "Case": {
+      "type": "object",
+      "description": "文件 p.7",
+      "required": ["caseId", "title", "supplierOrgId", "importerOrgId", "cnCode", "status", "createdAt", "policyProfileId"],
+      "additionalProperties": true,
+      "properties": {
+        "caseId": { "type": "string" },
+        "title": { "type": "string" },
+        "supplierOrgId": { "type": "string" },
+        "importerOrgId": { "type": "string" },
+        "cnCode": { "type": "string" },
+        "status": { "$ref": "#/definitions/CaseStatus" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "policyProfileId": { "type": "string" }
+      }
+    },
+
+    "InstallationYear": {
+      "type": "object",
+      "description": "文件 p.7——法定基礎層",
+      "required": [
+        "installationId", "operatorOrgId", "reportingYear", "productionRoute",
+        "systemBoundaryVersion", "productionTonnes", "verifiedIntensity", "verificationStatus"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "installationId": { "type": "string" },
+        "operatorOrgId": { "type": "string" },
+        "reportingYear": { "type": "integer" },
+        "productionRoute": { "type": "string" },
+        "systemBoundaryVersion": { "type": "string", "description": "待與碳專家/教授確認邊界定義後填入正式版本號" },
+        "productionTonnes": { "type": "number", "exclusiveMinimum": 0 },
+        "verifiedIntensity": { "type": "number", "exclusiveMinimum": 0, "description": "tCO2e/tonne，單位固定，不另外帶 unit 欄位" },
+        "verificationStatus": { "$ref": "#/definitions/VerificationStatus" },
+        "evidenceCoverage": {
+          "type": "object",
+          "description": "NOT IN SPEC，carbon-core 為了 missing_period fixture 需要而加：所有證據涵蓋期間的聯集",
+          "required": ["periodStart", "periodEnd"],
+          "properties": {
+            "periodStart": { "type": "string", "format": "date" },
+            "periodEnd": { "type": "string", "format": "date" }
+          }
+        },
+        "evidenceRefs": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+
+    "Shipment": {
+      "type": "object",
+      "description": "文件 p.7——交易分攤層",
+      "required": ["shipmentId", "caseId", "installationId", "reportingYear", "quantityTonnes", "allocatedEmissions", "allocationStatus"],
+      "additionalProperties": true,
+      "properties": {
+        "shipmentId": { "type": "string" },
+        "caseId": { "type": "string" },
+        "installationId": { "type": "string" },
+        "reportingYear": { "type": "integer" },
+        "quantityTonnes": { "type": "number", "exclusiveMinimum": 0 },
+        "allocatedEmissions": { "type": ["number", "null"], "description": "tCO2e；被 Gate 擋掉時為 null" },
+        "allocationStatus": { "$ref": "#/definitions/AllocationStatus" },
+        "factorSetId": { "type": ["string", "null"] },
+        "policyProfileId": { "type": ["string", "null"] }
+      }
+    },
+
+    "EvidenceItem": {
+      "type": "object",
+      "description": "文件 p.7",
+      "required": ["evidenceId", "caseId", "type", "fileHash", "coveredFrom", "coveredTo", "source", "version", "humanConfirmed", "vaultRef"],
+      "additionalProperties": true,
+      "properties": {
+        "evidenceId": { "type": "string" },
+        "caseId": { "type": "string" },
+        "type": { "$ref": "#/definitions/EvidenceType" },
+        "fileHash": { "type": "string" },
+        "coveredFrom": { "type": "string", "format": "date" },
+        "coveredTo": { "type": "string", "format": "date" },
+        "source": { "type": "string" },
+        "version": { "type": "integer" },
+        "humanConfirmed": { "type": "boolean" },
+        "vaultRef": { "type": "string" }
+      }
+    },
+
+    "IdentityContext": {
+      "type": "object",
+      "description": "文件 p.7——Phase 3 才會實際用到，先卡欄位",
+      "required": ["actorId", "orgId", "role", "assuranceLevel", "credentialRefs", "mandateId", "expiresAt", "revocationStatus"],
+      "additionalProperties": true,
+      "properties": {
+        "actorId": { "type": "string" },
+        "orgId": { "type": "string" },
+        "role": { "type": "string", "enum": ["Supplier", "Importer", "Verifier", "Agent", "PolicyAdmin"] },
+        "assuranceLevel": { "type": "string" },
+        "credentialRefs": { "type": "array", "items": { "type": "string" } },
+        "mandateId": { "type": ["string", "null"] },
+        "expiresAt": { "type": ["string", "null"], "format": "date-time" },
+        "revocationStatus": { "type": "string" }
+      }
+    },
+
+    "FactorSet": {
+      "type": "object",
+      "description": "文件 p.7",
+      "required": ["factorSetId", "issuer", "purpose", "version", "effectiveFrom", "effectiveTo", "sourceHash", "status"],
+      "additionalProperties": true,
+      "properties": {
+        "factorSetId": { "type": "string" },
+        "issuer": { "type": "string" },
+        "purpose": { "$ref": "#/definitions/FactorPurpose" },
+        "version": { "type": "string" },
+        "effectiveFrom": { "type": "string", "format": "date" },
+        "effectiveTo": { "type": ["string", "null"], "format": "date" },
+        "sourceHash": { "type": ["string", "null"] },
+        "status": { "type": "string", "enum": ["active", "expired", "revoked"] }
+      }
+    },
+
+    "PolicyProfile": {
+      "type": "object",
+      "description": "文件 p.7",
+      "required": ["policyProfileId", "cnCodes", "reportingYear", "allowedFactorSets", "requiredEvidence", "circuitId", "status"],
+      "additionalProperties": true,
+      "properties": {
+        "policyProfileId": { "type": "string" },
+        "cnCodes": { "type": "array", "items": { "type": "string" } },
+        "reportingYear": { "type": "integer" },
+        "allowedFactorSets": { "type": "array", "items": { "type": "string" } },
+        "requiredEvidence": { "type": "array", "items": { "$ref": "#/definitions/EvidenceType" } },
+        "circuitId": { "type": ["string", "null"], "description": "Phase 3 才會填，Phase 1 可為 null" },
+        "status": { "type": "string", "enum": ["active", "inactive"] }
+      }
+    },
+
+    "ProofPublicInputs": {
+      "type": "object",
+      "description": "NOT IN SPEC 的具體形狀——文件 p.7 只說 ProofEnvelope 有 publicInputs 物件，p.12/分工計畫 p.8 列出欄位群（案件綁定 installationId／reportingYear／shipmentId／quantity；規則綁定 policyVersion／factorSetId；重放防護 nonce／expiry；公開結果 allocatedEmissions／intensity commitment）。Day 3 P1 依此逐批綁定。全部為選填以維持向後相容，但 trust 層對有帶的欄位一律比對。",
+      "additionalProperties": true,
+      "properties": {
+        "caseId": { "type": "string" },
+        "shipmentId": { "type": "string" },
+        "installationId": { "type": "string" },
+        "reportingYear": { "type": "integer" },
+        "quantityTonnesScaled": { "type": "integer", "description": "10^6 定點整數" },
+        "allocatedEmissionsScaled": { "type": "integer", "description": "10^6 定點整數" },
+        "intensityCommitment": { "type": "string", "description": "sha256(intensityScaled + installationId + reportingYear)" },
+        "policyProfileId": { "type": "string" },
+        "policyVersion": { "type": ["string", "null"] },
+        "policySnapshotHash": { "type": ["string", "null"], "description": "Policy Registry 不可變快照摘要" },
+        "factorSetId": { "type": "string" },
+        "factorSetHash": { "type": ["string", "null"], "description": "Factor Registry 不可變快照摘要" },
+        "inputHash": { "type": "string", "description": "綁 CalculationReceipt.inputHash" },
+        "nonce": { "type": "string" },
+        "expiry": { "type": "string", "format": "date-time", "description": "必須等於 ProofEnvelope.expiresAt" }
+      }
+    },
+
+    "ProofEnvelope": {
+      "type": "object",
+      "description": "文件 p.7。Day 3 Demo 實作為 commitment fallback（分工計畫 p.9 ZKP 失敗備援第三選擇）：proof 欄位是 demoOnly:sha256: 前綴的 hash commitment，不是 zk-SNARK proof。",
+      "required": ["proofId", "circuitId", "publicInputs", "proof", "nonce", "expiresAt", "verificationKeyId"],
+      "additionalProperties": true,
+      "properties": {
+        "proofId": { "type": "string" },
+        "circuitId": { "type": "string" },
+        "publicInputs": { "$ref": "#/definitions/ProofPublicInputs" },
+        "proof": { "type": "string" },
+        "nonce": { "type": "string" },
+        "expiresAt": { "type": "string", "format": "date-time" },
+        "verificationKeyId": { "type": "string" },
+        "demoOnly": { "type": "boolean" }
+      }
+    },
+
+    "GateResult": {
+      "type": "object",
+      "description": "文件 p.7——注意 reasonCodes 是陣列，不是單一值",
+      "required": ["decision", "reasonCodes", "checks", "policyProfileId", "evaluatedAt", "inputHash"],
+      "additionalProperties": true,
+      "properties": {
+        "decision": { "$ref": "#/definitions/GateDecision" },
+        "reasonCodes": { "type": "array", "items": { "$ref": "#/definitions/ReasonCode" } },
+        "checks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "status"],
+            "properties": {
+              "name": { "type": "string" },
+              "status": { "type": "string", "enum": ["pass", "fail", "skipped"] },
+              "detail": { "type": "string" }
+            }
+          }
+        },
+        "policyProfileId": { "type": ["string", "null"] },
+        "evaluatedAt": { "type": "string", "format": "date-time" },
+        "inputHash": { "type": "string" },
+        "shipmentId": { "type": ["string", "null"], "description": "NOT IN SPEC 的擴充欄位：文件的 GateResult 沒有綁 shipmentId，但 carbon-core 逐批出貨評估需要知道是哪一批的結果" }
+      }
+    },
+
+    "AgentReasonCode": {
+      "type": "string",
+      "description": "Evidence Agent 專用固定 reason/rule code；須與 packages/contracts/enums.js 的 AGENT_REASON_CODE 同步。",
+      "enum": [
+        "PROMPT_INJECTION_DETECTED", "UNSAFE_DOCUMENT_TEXT", "EXTRACTION_TRUNCATED",
+        "EVIDENCE_CONTENT_UNAVAILABLE", "EVIDENCE_JSON_INVALID", "INVALID_EVIDENCE_PERIOD",
+        "EVIDENCE_MISSING", "EVIDENCE_PERIOD_INCOMPLETE", "UNIT_AMBIGUOUS",
+        "CROSS_TABLE_CHECK_SKIPPED", "ELECTRICITY_INTENSITY_OUT_OF_RANGE",
+        "FUEL_INTENSITY_OUT_OF_RANGE", "PRECURSOR_RATIO_OUT_OF_RANGE", "EXTRACTED_VALUE"
+      ]
+    },
+
+    "RiskReport": {
+      "type": "object",
+      "description": "文件 p.7、p.14 與 Day 4 p.10 的 Evidence Agent 固定輸出；Agent 只提供風險預審，不產生 Gate decision。",
+      "required": ["findings", "missingEvidence", "discrepancies", "citations", "modelVersion", "promptVersion", "reviewStatus"],
+      "additionalProperties": true,
+      "properties": {
+        "reportId": { "type": "string", "description": "NOT IN SPEC：Demo store 的衍生報告識別碼。" },
+        "caseId": { "type": "string", "description": "NOT IN SPEC：讓衍生報告綁定案件的向後相容擴充。" },
+        "entries": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["field", "value", "unit", "sourceFile", "sourcePage", "confidence", "humanConfirmed"],
+            "properties": {
+              "field": { "type": "string" },
+              "value": { "type": ["string", "number", "boolean", "null"] },
+              "unit": { "type": ["string", "null"] },
+              "sourceFile": { "type": "string" },
+              "sourcePage": { "type": "integer" },
+              "confidence": { "type": "number" },
+              "humanConfirmed": { "type": "boolean" },
+              "eligibleForCalculation": { "type": "boolean" },
+              "candidateUnits": { "type": "array", "items": { "type": "string" } }
+            }
+          }
+        },
+        "findings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["reasonCode", "severity", "message"],
+            "properties": {
+              "reasonCode": { "$ref": "#/definitions/AgentReasonCode" },
+              "severity": { "type": "string", "enum": ["info", "warning", "high"] },
+              "message": { "type": "string" }
+            }
+          }
+        },
+        "missingEvidence": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["requiredEvidence", "coveredPeriod", "missingPeriod", "requestedAction"],
+            "properties": {
+              "requiredEvidence": { "$ref": "#/definitions/EvidenceType" },
+              "coveredPeriod": { "type": ["string", "null"] },
+              "missingPeriod": { "type": "string" },
+              "requestedAction": { "type": "string" }
+            }
+          }
+        },
+        "discrepancies": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["ruleId", "leftValue", "rightValue", "difference", "severity", "possibleExplanations"],
+            "properties": {
+              "ruleId": { "$ref": "#/definitions/AgentReasonCode" },
+              "leftValue": { "type": ["string", "number", "null"] },
+              "rightValue": { "type": ["string", "number", "null"] },
+              "difference": { "type": ["string", "number", "null"] },
+              "severity": { "type": "string", "enum": ["info", "warning", "high"] },
+              "possibleExplanations": { "type": "array", "items": { "type": "string" } },
+              "leftCitation": { "type": "integer" },
+              "rightCitation": { "type": "integer" }
+            }
+          }
+        },
+        "citations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["reasonCode", "sourceFile", "sourcePage"],
+            "properties": {
+              "reasonCode": { "$ref": "#/definitions/AgentReasonCode" },
+              "sourceFile": { "type": "string" },
+              "sourcePage": { "type": "integer" }
+            }
+          }
+        },
+        "summary": {
+          "type": "object",
+          "required": ["facts", "openIssues", "nextActions", "citations"],
+          "properties": {
+            "facts": { "type": "array", "items": { "type": "string" } },
+            "openIssues": { "type": "array", "items": { "type": "string" } },
+            "nextActions": { "type": "array", "items": { "type": "string" } },
+            "citations": { "type": "array", "items": { "type": "integer" } }
+          }
+        },
+        "modelVersion": { "type": "string" },
+        "promptVersion": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "reviewStatus": { "type": "string", "enum": ["HUMAN_REVIEW_REQUIRED", "READY_FOR_HUMAN_REVIEW"] },
+        "reviewedBy": { "type": ["string", "null"] },
+        "reviewedAt": { "type": ["string", "null"], "format": "date-time" }
+      }
+    },
+
+    "CalculationReceipt": {
+      "type": "object",
+      "description": "NOT IN SPEC 的具體形狀——文件 p.5/p.10 只講『輸入 Hash、方法／factor 版本、結果、時間』，沒給正式 schema，這是 carbon-core 依描述設計的形狀",
+      "required": ["inputHash", "installationId", "reportingYear", "policyProfileId", "factorSetId", "metadata", "result", "computedAt"],
+      "additionalProperties": true,
+      "properties": {
+        "inputHash": { "type": "string" },
+        "installationId": { "type": "string" },
+        "reportingYear": { "type": "integer" },
+        "policyProfileId": { "type": "string" },
+        "factorSetId": { "type": "string" },
+        "metadata": {
+          "type": "object",
+          "required": ["factor", "policy", "scale", "roundingRule", "methodVersion"],
+          "properties": {
+            "factor": {
+              "type": "object",
+              "required": ["factorSetId", "version", "sourceHash"],
+              "properties": {
+                "factorSetId": { "type": "string" },
+                "version": { "type": "string" },
+                "sourceHash": { "type": "string" }
+              }
+            },
+            "policy": {
+              "type": "object",
+              "required": ["policyProfileId", "version"],
+              "properties": {
+                "policyProfileId": { "type": "string" },
+                "version": { "type": "string" }
+              }
+            },
+            "scale": { "type": "integer" },
+            "roundingRule": { "type": "string" },
+            "methodVersion": { "type": "string" }
+          }
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "totalEmissionsScaled": { "type": "integer" },
+            "totalEmissions": { "type": "number" }
+          }
+        },
+        "computedAt": { "type": "string", "format": "date-time" }
+      }
+    }
+  }
+}

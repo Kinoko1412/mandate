@@ -1,0 +1,73 @@
+{
+  "validateInstallationYear": {
+    "normal": {
+      "input": { "installationId": "TW-STEEL-01", "operatorOrgId": "ORG-TW-STEEL-SUPPLIER", "reportingYear": 2026, "productionRoute": "basic-oxygen-furnace-demo", "systemBoundaryVersion": "demo-v0", "productionTonnes": 200, "verifiedIntensity": 1.80, "verificationStatus": "confirmed", "productionUnit": "tonne", "intensityUnit": "tCO2e/tonne" },
+      "output": { "installationId": "TW-STEEL-01", "operatorOrgId": "ORG-TW-STEEL-SUPPLIER", "reportingYear": 2026, "productionRoute": "basic-oxygen-furnace-demo", "systemBoundaryVersion": "demo-v0", "productionTonnes": 200, "verifiedIntensity": 1.80, "verificationStatus": "confirmed", "evidenceCoverage": null, "evidenceRefs": [] }
+    },
+    "error_unknown_unit": { "input_note": "productionUnit: 'kg'", "throws": { "name": "CarbonCoreError", "reasonCode": "UNKNOWN_UNIT" } },
+    "error_zero_production": { "input_note": "productionTonnes: 0", "throws": { "name": "CarbonCoreError", "reasonCode": "ZERO_OR_NEGATIVE_QUANTITY" } },
+    "error_invalid_year": { "input_note": "reportingYear: 1500", "throws": { "name": "CarbonCoreError", "reasonCode": "INVALID_REPORTING_YEAR" } }
+  },
+  "calculateAnnualEmissions": {
+    "normal": {
+      "input_note": "見 fixtures/normal.json 的 activities + factorSet + policyProfile；Demo 係數均標 demoOnly，不是官方係數",
+      "output": { "totalEmissionsScaled": 360000000, "totalEmissions": 360, "unit": "tCO2e", "basis_note": "兩項 terms：100 MWh×2=200、80 GJ×2=160，保存 factorRef 與 scaled 值" }
+    },
+    "error_factor_not_allowed": { "input_note": "factorSetId 不在 policyProfile.allowedFactorSets", "throws": { "name": "CarbonCoreError", "reasonCode": "FACTOR_NOT_ALLOWED" } },
+    "error_missing_factor_ref": { "throws": { "name": "CarbonCoreError", "reasonCode": "MISSING_CALCULATION_CONTEXT" } },
+    "error_unknown_unit": { "throws": { "name": "CarbonCoreError", "reasonCode": "UNKNOWN_UNIT" } },
+    "error_overflow": { "throws": { "name": "CarbonCoreError", "reasonCode": "CALCULATION_OVERFLOW" } }
+  },
+  "calculateIntensity": {
+    "normal": {
+      "input": { "annualEmissions_note": "calculateAnnualEmissions 的結果（360 tCO2e）", "productionTonnes": 200 },
+      "output": { "intensityScaled": 1800000, "intensity": 1.80, "unit": "tCO2e/tonne" }
+    }
+  },
+  "allocateShipment": {
+    "normal": {
+      "input": {
+        "installationYear": "見 fixtures/normal.json",
+        "shipment": { "shipmentId": "SHIP-A", "caseId": "CASE-2026-001", "installationId": "TW-STEEL-01", "reportingYear": 2026, "quantityTonnes": 100, "quantityUnit": "tonne", "factorSetId": "CBAM-DEMO-2026-v1" },
+        "policyProfile": { "policyProfileId": "CBAM-STEEL-2026-v1", "allowedFactorSets": ["CBAM-DEMO-2026-v1"] }
+      },
+      "output": {
+        "shipment": { "shipmentId": "SHIP-A", "caseId": "CASE-2026-001", "installationId": "TW-STEEL-01", "reportingYear": 2026, "quantityTonnes": 100, "allocatedEmissions": 180, "allocatedEmissionsScaled": 180000000, "allocationStatus": "READY_FOR_VERIFIER", "factorSetId": "CBAM-DEMO-2026-v1", "policyProfileId": "CBAM-STEEL-2026-v1" },
+        "gateResult": { "shipmentId": "SHIP-A", "decision": "GATE_OK", "reasonCodes": ["GATE_OK"], "checks": "[...]", "policyProfileId": "CBAM-STEEL-2026-v1", "evaluatedAt": "<ISO timestamp>", "inputHash": "<sha256 hex>" }
+      }
+    },
+    "error_case_context_mismatch": { "input_note": "shipment.installationId 跟 installationYear.installationId 對不上", "output": { "shipment": null, "gateResult": { "decision": "BLOCKED", "reasonCodes": ["CASE_CONTEXT_MISMATCH"] } } },
+    "error_evidence_missing": { "input_note": "installationYear.verificationStatus = 'draft'", "output": { "shipment": null, "gateResult": { "decision": "NEEDS_EVIDENCE", "reasonCodes": ["EVIDENCE_MISSING"] } } },
+    "error_evidence_period_incomplete": { "input_note": "installationYear.evidenceCoverage 只到 6/30 卻申報全年", "output": { "shipment": null, "gateResult": { "decision": "NEEDS_EVIDENCE", "reasonCodes": ["EVIDENCE_PERIOD_INCOMPLETE"] } } },
+    "error_factor_not_allowed": { "input_note": "shipment.factorSetId 不在 policyProfile.allowedFactorSets", "output": { "shipment": null, "gateResult": { "decision": "BLOCKED", "reasonCodes": ["FACTOR_NOT_ALLOWED"] } } },
+    "error_unknown_unit": { "input_note": "shipment.quantityUnit = 'kg'", "output": { "shipment": null, "gateResult": { "decision": "BLOCKED", "reasonCodes": ["UNKNOWN_UNIT"] } } }
+  },
+  "reconcileAllocationLedger": {
+    "normal": { "input_note": "見 fixtures/normal.json，SHIP-A(100)+SHIP-B(60)=160 <= 200，兩批都 GATE_OK" },
+    "error_allocation_exceeds_production": { "input_note": "見 fixtures/tampered_quantity.json，150+60=210 > 200", "output": { "second_shipment_gateResult": { "decision": "BLOCKED", "reasonCodes": ["ALLOCATION_EXCEEDS_PRODUCTION"] } } },
+    "error_duplicate_shipment_id": { "input_note": "同一個 shipmentId 出現兩次", "output": { "second_occurrence_gateResult": { "decision": "BLOCKED", "reasonCodes": ["DUPLICATE_SHIPMENT_ID"] } } }
+  },
+  "buildCalculationReceipt": {
+    "normal": {
+      "input_note": "installationYear + activities + factorSet + policyProfile 見 fixtures/normal.json",
+      "output": {
+        "inputHash": "<64 字元 sha256 hex>",
+        "installationId": "TW-STEEL-01",
+        "reportingYear": 2026,
+        "policyProfileId": "CBAM-STEEL-2026-v1",
+        "factorSetId": "CBAM-DEMO-2026-v1",
+        "metadata": {
+          "factor": { "factorSetId": "CBAM-DEMO-2026-v1", "version": "1", "sourceHash": "sha256:demo-factorset-v1" },
+          "policy": { "policyProfileId": "CBAM-STEEL-2026-v1", "version": "1" },
+          "scale": 1000000,
+          "roundingRule": "ROUND_HALF_UP_TO_NEAREST_SCALED_INTEGER",
+          "methodVersion": "sum-activity-factor-v1"
+        },
+        "result": { "totalEmissionsScaled": 360000000, "totalEmissions": 360 },
+        "computedAt": "<ISO timestamp>"
+      }
+    },
+    "error_missing_factor_set": { "throws": { "name": "CarbonCoreError", "reasonCode": "MISSING_CALCULATION_CONTEXT" } },
+    "error_missing_policy_profile": { "throws": { "name": "CarbonCoreError", "reasonCode": "MISSING_CALCULATION_CONTEXT" } }
+  }
+}

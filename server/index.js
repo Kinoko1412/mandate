@@ -56,6 +56,10 @@ function contentType(filePath) {
 function serveStatic(req, res, urlPath) {
   let rel = decodeURIComponent(urlPath.split('?')[0]);
   if (rel === '/' || rel === '') rel = '/index.html';
+  if (path.basename(rel).includes('.bak-')) {
+    sendJson(res, 404, { error: 'Not found' });
+    return;
+  }
   const safe = path.normalize(rel).replace(/^(\.\.[/\\])+/, '');
   const filePath = path.join(PUBLIC_DIR, safe);
   if (!filePath.startsWith(PUBLIC_DIR)) {
@@ -72,22 +76,31 @@ function serveStatic(req, res, urlPath) {
   });
 }
 
-async function handleApi(req, res, pathname) {
+async function handleApi(req, res, pathname, requestContext) {
   const method = req.method || 'GET';
   let body = {};
   if (method === 'POST' || method === 'PUT' || method === 'PATCH') {
     try {
       body = await readBody(req);
     } catch (e) {
-      return sendJson(res, 400, { error: 'Invalid JSON body' });
+      return sendJson(res, 400, {
+        code: 'INVALID_JSON',
+        message: 'JSON request body 格式無效。',
+        retryable: false,
+        details: null,
+      });
     }
   }
   try {
-    const result = await handleApiPath(method, pathname, body);
+    const result = await handleApiPath(method, pathname, body, requestContext);
     return sendJson(res, result.status, result.body);
   } catch (err) {
-    console.error(err);
-    return sendJson(res, 500, { error: 'Internal error', message: String(err.message || err) });
+    return sendJson(res, 500, {
+      code: 'INTERNAL_ERROR',
+      message: '伺服器暫時無法處理此請求。',
+      retryable: false,
+      details: null,
+    });
   }
 }
 
@@ -98,13 +111,22 @@ const server = http.createServer(async (req, res) => {
 
   try {
     if (pathname.startsWith('/api/')) {
-      await handleApi(req, res, pathname);
+      await handleApi(req, res, pathname, {
+        // Explicit demo-only role switch mapped to a fixed server-side whitelist.
+        demoRole: req.headers['x-demo-role'] || url.searchParams.get('demoRole'),
+        // Keep Vault credentials out of URLs and query logs.
+        vaultToken: req.headers['x-vault-token'],
+      });
       return;
     }
     serveStatic(req, res, pathname);
   } catch (err) {
-    console.error(err);
-    sendJson(res, 500, { error: 'Internal error', message: String(err.message || err) });
+    sendJson(res, 500, {
+      code: 'INTERNAL_ERROR',
+      message: '伺服器暫時無法處理此請求。',
+      retryable: false,
+      details: null,
+    });
   }
 });
 

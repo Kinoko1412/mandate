@@ -1,0 +1,398 @@
+{
+  "title": "Day 4 Workflow + Agent + Trust Demo API Examples",
+  "description": "Human-readable examples aligned with server/workflowApi.js Day 4 routes. Not a JSON Schema document.",
+  "baseUrl": "http://127.0.0.1:3847",
+  "deployedBaseUrl": "https://mandate.1qaz0726.workers.dev",
+  "demoActors": {
+    "Supplier": {
+      "actorId": "demo-supplier-001",
+      "orgId": "ORG-TW-STEEL-SUPPLIER",
+      "role": "Supplier",
+      "demoOnly": true
+    },
+    "Importer": {
+      "actorId": "demo-importer-001",
+      "orgId": "ORG-EU-IMPORTER-DEMO",
+      "role": "Importer",
+      "demoOnly": true
+    },
+    "Verifier": {
+      "actorId": "demo-verifier-001",
+      "orgId": "ORG-CBAM-VERIFIER-DEMO",
+      "role": "Verifier",
+      "demoOnly": true
+    }
+  },
+  "fixedCaseId": "CASE-2026-001",
+  "notes": {
+    "notJsonSchema": "本檔不是 JSON Schema；勿以 $schema 驗證。",
+    "maskedExamples": "response 內 [MASKED: …] 字串僅供人類閱讀對照，不可直接當測試 fixture 或斷言期望值。",
+    "agent": "Evidence Agent 是 demo-rule-based-no-llm-v1 規則引擎，非 LLM；execution=executed 不代表 verification=verified。",
+    "proof": "ProofEnvelope.proof 為 demoOnly:sha256: commitment，非 zk-SNARK。",
+    "readiness": "Agent 不參與 READY；只有 Trust revalidate 可推到 READY_FOR_VERIFIER。case.readiness 為字串；頂層 readiness 為物件。",
+    "demoAttack": "POST /api/demo/attack 不修改 workflow store；storeModified 恆 false。"
+  },
+  "examples": [
+    {
+      "id": "auth_missing_role",
+      "description": "未指定 Demo 角色",
+      "request": {
+        "method": "GET",
+        "path": "/api/cases",
+        "headers": {}
+      },
+      "response": {
+        "status": 401,
+        "body": {
+          "code": "DEMO_ROLE_REQUIRED",
+          "message": "請使用 x-demo-role header 或 demoRole query 選擇 Supplier、Importer 或 Verifier。",
+          "retryable": false,
+          "details": {
+            "demoOnly": true
+          }
+        }
+      }
+    },
+    {
+      "id": "agent_analyze_case_path",
+      "description": "Supplier 觸發案件 Evidence Agent 預審（canonical case path）",
+      "prerequisite": "四份 synthetic evidence 已上傳並人工確認；已 submit。",
+      "request": {
+        "method": "POST",
+        "path": "/api/cases/CASE-2026-001/agent/analyze",
+        "headers": {
+          "x-demo-role": "Supplier",
+          "content-type": "application/json"
+        },
+        "body": {}
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "report": {
+            "reportId": "risk_a1b2c3d4e5f678901234",
+            "caseId": "CASE-2026-001",
+            "modelVersion": "demo-rule-based-no-llm-v1",
+            "promptVersion": "evidence-risk-contract-v1",
+            "reviewStatus": "READY_FOR_HUMAN_REVIEW",
+            "timestamp": "2026-08-24T09:00:00.000Z",
+            "entries": "[MASKED: array of extracted fields with sourcePage/confidence]",
+            "findings": "[MASKED: demo heuristics only]",
+            "missingEvidence": [],
+            "discrepancies": [],
+            "summary": {
+              "openIssues": [],
+              "headline": "[MASKED]"
+            },
+            "demoOnly": true
+          },
+          "service": {
+            "status": "available",
+            "verification": "not_verified",
+            "execution": "executed",
+            "checks": [{ "name": "analysis_executed", "status": "pass" }],
+            "reasonCodes": []
+          },
+          "caseStatusUnchanged": "METHOD_REVIEW",
+          "demoOnly": true
+        }
+      }
+    },
+    {
+      "id": "agent_analyze_alias",
+      "description": "Supplier 觸發 analyze alias（body.caseId）",
+      "request": {
+        "method": "POST",
+        "path": "/api/agent/analyze",
+        "headers": {
+          "x-demo-role": "Supplier",
+          "content-type": "application/json"
+        },
+        "body": {
+          "caseId": "CASE-2026-001"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "report": {
+            "reportId": "risk_a1b2c3d4e5f678901234",
+            "caseId": "CASE-2026-001",
+            "modelVersion": "demo-rule-based-no-llm-v1",
+            "reviewStatus": "READY_FOR_HUMAN_REVIEW"
+          },
+          "service": {
+            "execution": "executed",
+            "verification": "not_verified"
+          },
+          "caseStatusUnchanged": "METHOD_REVIEW",
+          "demoOnly": true
+        }
+      }
+    },
+    {
+      "id": "agent_analyze_forbidden_importer",
+      "description": "Importer 不可觸發 Agent 分析",
+      "request": {
+        "method": "POST",
+        "path": "/api/cases/CASE-2026-001/agent/analyze",
+        "headers": {
+          "x-demo-role": "Importer",
+          "content-type": "application/json"
+        },
+        "body": {}
+      },
+      "response": {
+        "status": 403,
+        "body": {
+          "code": "ROLE_FORBIDDEN",
+          "message": "目前角色無權執行此案件動作。",
+          "retryable": false,
+          "details": null
+        }
+      }
+    },
+    {
+      "id": "workflow_revalidate_ready",
+      "description": "Supplier Trust 重驗 → READY_FOR_VERIFIER（normal fixture 四份全年 evidence）",
+      "request": {
+        "method": "POST",
+        "path": "/api/workflow/revalidate",
+        "headers": {
+          "x-demo-role": "Supplier",
+          "content-type": "application/json"
+        },
+        "body": {}
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "case": {
+            "caseId": "CASE-2026-001",
+            "status": "READY_FOR_VERIFIER",
+            "readiness": "verified",
+            "readyDisclaimer": "具備送交查驗準備條件，不代表正式查驗完成。",
+            "demoOnly": true
+          },
+          "readiness": {
+            "status": "READY_FOR_VERIFIER",
+            "readiness": "verified",
+            "reasonCodes": [],
+            "message": "具備送交查驗準備條件，不代表正式查驗完成。",
+            "services": "[MASKED: agent/proof/gate service chips]"
+          },
+          "demoOnly": true
+        }
+      }
+    },
+    {
+      "id": "workflow_revalidate_forbidden_importer",
+      "description": "Importer 不可觸發 revalidate",
+      "request": {
+        "method": "POST",
+        "path": "/api/workflow/revalidate",
+        "headers": {
+          "x-demo-role": "Importer",
+          "content-type": "application/json"
+        },
+        "body": {}
+      },
+      "response": {
+        "status": 403,
+        "body": {
+          "code": "ROLE_FORBIDDEN",
+          "message": "目前角色無權執行此案件動作。",
+          "retryable": false,
+          "details": null
+        }
+      }
+    },
+    {
+      "id": "demo_attack_tampered_quantity",
+      "description": "攻擊情境：Proof 宣稱 quantity 與案件快照不符",
+      "request": {
+        "method": "POST",
+        "path": "/api/demo/attack",
+        "headers": {
+          "x-demo-role": "Supplier",
+          "content-type": "application/json"
+        },
+        "body": {
+          "scenario": "tampered_quantity"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "scenario": "tampered_quantity",
+          "decision": "BLOCKED",
+          "reasonCodes": ["PUBLIC_INPUT_MISMATCH"],
+          "storeModified": false,
+          "demoOnly": true
+        }
+      }
+    },
+    {
+      "id": "demo_attack_wrong_factor",
+      "description": "攻擊情境：factorSet 不在 Policy 允許清單",
+      "request": {
+        "method": "POST",
+        "path": "/api/demo/attack",
+        "headers": {
+          "x-demo-role": "Supplier",
+          "content-type": "application/json"
+        },
+        "body": {
+          "scenario": "wrong_factor"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "scenario": "wrong_factor",
+          "decision": "BLOCKED",
+          "reasonCodes": ["FACTOR_NOT_ALLOWED"],
+          "storeModified": false,
+          "demoOnly": true
+        }
+      }
+    },
+    {
+      "id": "demo_attack_proof_context_swap",
+      "description": "攻擊情境：SHIP-A Proof 套到 SHIP-B",
+      "request": {
+        "method": "POST",
+        "path": "/api/demo/attack",
+        "headers": {
+          "x-demo-role": "Supplier",
+          "content-type": "application/json"
+        },
+        "body": {
+          "scenario": "proof_context_swap"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "scenario": "proof_context_swap",
+          "decision": "BLOCKED",
+          "reasonCodes": ["PROOF_CONTEXT_MISMATCH"],
+          "storeModified": false,
+          "demoOnly": true
+        }
+      }
+    },
+    {
+      "id": "demo_attack_invalid_scenario",
+      "description": "拒絕任意 scenario／攻擊者自帶 envelope",
+      "request": {
+        "method": "POST",
+        "path": "/api/demo/attack",
+        "headers": {
+          "x-demo-role": "Supplier",
+          "content-type": "application/json"
+        },
+        "body": {
+          "scenario": "arbitrary_envelope",
+          "envelope": { "proof": "attacker-controlled" }
+        }
+      },
+      "response": {
+        "status": 400,
+        "body": {
+          "code": "DEMO_SCENARIO_INVALID",
+          "message": "scenario 必須是固定攻擊情境。",
+          "retryable": false,
+          "details": {
+            "allowedScenarios": [
+              "tampered_quantity",
+              "wrong_factor",
+              "proof_context_swap"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "physical_reality_post",
+      "description": "物理真實邊界（文件一致 ≠ 儀表已校正）",
+      "request": {
+        "method": "POST",
+        "path": "/api/demo/physical-reality",
+        "headers": {
+          "x-demo-role": "Importer",
+          "content-type": "application/json"
+        },
+        "body": {}
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "scenario": "consistent_documents_but_uncalibrated_meter",
+          "documentConsistencyVerified": true,
+          "commitmentVerified": true,
+          "gateScope": "DATA_CONSISTENCY_ONLY",
+          "physicalRealityVerified": false,
+          "finding": "文件數字彼此一致，但現場儀表失效或未校正，資料一致性不能證明物理真實。",
+          "recommendedAction": "ONSITE_VERIFICATION",
+          "nextStep": "轉交查驗員檢查校正紀錄，並安排實地查驗。",
+          "caseStatusUnchanged": true,
+          "gateUnchanged": true,
+          "demoOnly": true
+        }
+      }
+    },
+    {
+      "id": "physical_reality_get",
+      "description": "物理真實邊界（GET 同 POST 固定回應）",
+      "request": {
+        "method": "GET",
+        "path": "/api/demo/physical-reality",
+        "headers": {
+          "x-demo-role": "Verifier"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "physicalRealityVerified": false,
+          "gateScope": "DATA_CONSISTENCY_ONLY",
+          "demoOnly": true
+        }
+      }
+    },
+    {
+      "id": "importer_agent_safe_summary",
+      "description": "Importer 案件 detail 僅見 agent 安全摘要（非 RiskReport 全文）",
+      "request": {
+        "method": "GET",
+        "path": "/api/cases/CASE-2026-001",
+        "headers": {
+          "x-demo-role": "Importer"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "case": {
+            "caseId": "CASE-2026-001",
+            "status": "READY_FOR_VERIFIER",
+            "agentSummary": {
+              "reportId": "risk_a1b2c3d4e5f678901234",
+              "modelVersion": "demo-rule-based-no-llm-v1",
+              "counts": {
+                "findings": 0,
+                "missingEvidence": 0,
+                "discrepancies": 0,
+                "openIssues": 0
+              },
+              "reasonCodes": [],
+              "nextActions": ["可交由查驗員進行後續專業檢視。"]
+            },
+            "demoOnly": true
+          }
+        }
+      }
+    }
+  ]
+}

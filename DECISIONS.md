@@ -107,3 +107,4 @@
 **修訂記錄**：
 
 - 2026-07-27：新增稽核紀錄／核准紀錄／AI 對話的 Supabase 選填雙寫持久化（`server/supabaseSync.js`、`supabase/schema.sql`）。原因：官方六信任要點之一的 Audit Log 屬實際評分項目，V1 全記憶體儲存重啟即消失，無法對評審展示「可追蹤」的持久性與防竄改（雜湊鏈）。此為**附加雙寫**，不改動核心 Policy Engine 判斷邏輯、不觸碰第 7 節任何排除項目、未設金鑰時完全不啟用；為使用者主動要求，非 AI 建議。
+- **2026-08-23（已由隊長葉士愷正式宣告，滿足本文件第 9 節「隊長明確宣告改題」的程序要求；與隊友黃昱羲討論並確認一致）**：改題範圍大幅調整——兩人（葉士愷 + 黃昱羲）討論後決定改採兩份新規劃文件實作：`可信碳排證據Agent_8月24日至28日雙人落地分工計畫.pdf`（五天四次交棒時程）+ `可信碳排證據Agent_落地風險審查與修正版方案.pdf`（25 頁，法定資料模型改為「工廠年度層＋批次交易層」）。**這使本文件第 1、3、4、6 節（PCF 單筆申報敘事、Demo 三幕、`POL-CARB-001`／`POL-HITL-010`／`POL-REV-010` policyId 契約、青禾零件情境）不再是本週的實作依據**，改用新的 `GateStatus`（`READY_FOR_VERIFIER`／`NEEDS_EVIDENCE`／`METHOD_REVIEW`／`VERIFIER_REQUIRED`／`BLOCKED`）與新的 `ReasonCode` 體系（見 `packages/contracts/enums.js`），Demo 情境換成鋼鐵單一案例（`TW-STEEL-01`）。原因：兩份新文件是賽前工作坊後對法規／風險落地面的深入審查結果，原版單筆 PCF 申報敘事不符合 CBAM 實際法定計算底層（工廠安裝／製程／曆年）。舊的 `server/policy.js`／`docs/trust/*.md` 架構暫不刪除，留作參考（見 `services/carbon-core/README.md` 的「已知限制」與同資料夾外的 fork 現況盤點文件）。

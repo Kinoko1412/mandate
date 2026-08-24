@@ -7,7 +7,12 @@
     "dev:cf": "wrangler dev",
     "deploy:cf": "wrangler deploy",
     "smoke": "node server/smoke.js",
-    "smoke:agent": "node server/agent-smoke.js"
+    "smoke:agent": "node server/agent-smoke.js",
+    "smoke:carbon-core": "node tests/carbon-core/smoke.js",
+    "smoke:workflow": "node tests/workflow/smoke.js && node tests/ui/static-contract.js",
+    "smoke:ui": "node tests/ui/static-contract.js",
+    "smoke:trust": "node tests/trust/smoke.js",
+    "smoke:evidence-agent": "node tests/agent/smoke.js"
   },
   "devDependencies": {
     "wrangler": "^4.24.0"

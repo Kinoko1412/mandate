@@ -1,0 +1,60 @@
+{
+  "description": "缺期案例：電費只涵蓋 1–6 月（規格 p.8 必備異常 Fixture 表逐字定義）→ NEEDS_EVIDENCE／EVIDENCE_PERIOD_INCOMPLETE",
+  "case": {
+    "caseId": "CASE-2026-001",
+    "title": "TW-STEEL-01 2026 年度示範案件（缺期版）",
+    "supplierOrgId": "ORG-TW-STEEL-SUPPLIER",
+    "importerOrgId": "ORG-EU-IMPORTER-DEMO",
+    "cnCode": "72085100",
+    "status": "NEEDS_EVIDENCE",
+    "createdAt": "2026-08-24T09:00:00Z",
+    "policyProfileId": "CBAM-STEEL-2026-v1"
+  },
+  "installationYear": {
+    "installationId": "TW-STEEL-01",
+    "operatorOrgId": "ORG-TW-STEEL-SUPPLIER",
+    "reportingYear": 2026,
+    "productionRoute": "basic-oxygen-furnace-demo",
+    "systemBoundaryVersion": "demo-v0-待與碳專家確認",
+    "productionTonnes": 200,
+    "verifiedIntensity": 1.80,
+    "verificationStatus": "confirmed",
+    "productionUnit": "tonne",
+    "intensityUnit": "tCO2e/tonne",
+    "evidenceCoverage": { "periodStart": "2026-01-01", "periodEnd": "2026-06-30" },
+    "evidenceRefs": ["EV-ELEC-01-SHORT", "EV-FUEL-01", "EV-PROD-01", "EV-PRECURSOR-01"],
+    "demoOnly": true
+  },
+  "evidenceItems": [
+    { "evidenceId": "EV-ELEC-01-SHORT", "caseId": "CASE-2026-001", "type": "electricity_bill", "fileHash": "sha256:short-elec", "coveredFrom": "2026-01-01", "coveredTo": "2026-06-30", "source": "utility-provider-demo", "version": 1, "humanConfirmed": true, "vaultRef": "vault-demo://CASE-2026-001/EV-ELEC-01-SHORT" },
+    { "evidenceId": "EV-FUEL-01", "caseId": "CASE-2026-001", "type": "fuel_ledger", "fileHash": "sha256:normal-fuel", "coveredFrom": "2026-01-01", "coveredTo": "2026-12-31", "source": "fuel-supplier-demo", "version": 1, "humanConfirmed": true, "vaultRef": "vault-demo://CASE-2026-001/EV-FUEL-01" },
+    { "evidenceId": "EV-PROD-01", "caseId": "CASE-2026-001", "type": "production_report", "fileHash": "sha256:normal-prod", "coveredFrom": "2026-01-01", "coveredTo": "2026-12-31", "source": "internal-mes-demo", "version": 1, "humanConfirmed": true, "vaultRef": "vault-demo://CASE-2026-001/EV-PROD-01" },
+    { "evidenceId": "EV-PRECURSOR-01", "caseId": "CASE-2026-001", "type": "precursor_list", "fileHash": "sha256:normal-precursor", "coveredFrom": "2026-01-01", "coveredTo": "2026-12-31", "source": "procurement-demo", "version": 1, "humanConfirmed": true, "vaultRef": "vault-demo://CASE-2026-001/EV-PRECURSOR-01" }
+  ],
+  "shipments": [
+    { "shipmentId": "SHIP-A", "caseId": "CASE-2026-001", "installationId": "TW-STEEL-01", "reportingYear": 2026, "quantityTonnes": 100, "allocatedEmissions": null, "allocationStatus": "NEEDS_EVIDENCE", "quantityUnit": "tonne", "factorSetId": "CBAM-DEMO-2026-v1" }
+  ],
+  "factorSet": {
+    "factorSetId": "CBAM-DEMO-2026-v1",
+    "issuer": "demo-authority",
+    "purpose": "CBAM_ACTUAL",
+    "version": "1",
+    "effectiveFrom": "2026-01-01",
+    "effectiveTo": null,
+    "sourceHash": "sha256:demo-factorset-v1",
+    "status": "active",
+    "demoOnly": true
+  },
+  "policyProfile": {
+    "policyProfileId": "CBAM-STEEL-2026-v1",
+    "cnCodes": ["72085100"],
+    "reportingYear": 2026,
+    "allowedFactorSets": ["CBAM-DEMO-2026-v1"],
+    "requiredEvidence": ["electricity_bill", "fuel_ledger", "production_report", "precursor_list"],
+    "circuitId": null,
+    "status": "active"
+  },
+  "expected": [
+    { "shipmentId": "SHIP-A", "decision": "NEEDS_EVIDENCE", "reasonCodes": ["EVIDENCE_PERIOD_INCOMPLETE"] }
+  ]
+}
