@@ -122,3 +122,15 @@
   「三層資料一致不矛盾」「無效角色拒絕」「案件不存在 404」「不影響既有 API 仍要求
   x-demo-role」。
 - **既有全部測試（165+6+5+8+7=191 項）重跑確認零回歸**。
+
+### 5. `schema-v1.json` 接上 ajv — ✅ 完成（低優先項目，順手做掉）
+
+- `packages/contracts/validator.js` 原本是手寫的最小 JSON Schema 子集驗證器（只認得
+  type/enum/exclusiveMinimum/required/properties/items/$ref，完全不檢查
+  additionalProperties／pattern／format／minLength 這類關鍵字），Day 1 就記錄成已知限制。
+- 換成真的用 `ajv`（+`ajv-formats` 處理 date/date-time 格式）編譯 `schema-v1.json` 本身，
+  對外介面（`validateCanonical(entityName, value) -> {valid, errors}`）完全不變，呼叫端
+  一行都不用改。
+- **驗證結果：全部 191 項既有測試換成 ajv 後原封不動全過**，證實 Day 1 當時的判斷是對的
+  （手寫檢查邏輯確實功能等價涵蓋了測試案例需要的驗證），現在這件事有真正的 JSON Schema
+  驗證器背書，不再只是手寫邏輯的近似值。

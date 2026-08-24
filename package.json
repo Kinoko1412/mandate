@@ -19,6 +19,8 @@
     "smoke:dpp": "node tests/dpp/smoke.js"
   },
   "devDependencies": {
+    "ajv": "^8.20.0",
+    "ajv-formats": "^3.0.1",
     "circomlib": "^2.0.5",
     "wrangler": "^4.24.0"
   },
