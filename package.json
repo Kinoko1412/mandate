@@ -10,7 +10,8 @@
     "smoke:agent": "node server/agent-smoke.js",
     "smoke:carbon-core": "node tests/carbon-core/smoke.js",
     "smoke:workflow": "node tests/workflow/smoke.js && node tests/ui/static-contract.js",
-    "smoke:ui": "node tests/ui/static-contract.js"
+    "smoke:ui": "node tests/ui/static-contract.js",
+    "smoke:trust": "node tests/trust/smoke.js"
   },
   "devDependencies": {
     "wrangler": "^4.24.0"

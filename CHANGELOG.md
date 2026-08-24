@@ -1,5 +1,42 @@
 # CHANGELOG
 
+## Day 3 — Trust Engine：Proof + Factor Registry + Policy Gate（2026-08-26，working tree 未 commit）
+
+分支 `feature/trust-engine`（從 `feature/case-workflow-ui` 開出，含 Day 1+2）；依 `docs/handoff/DAY3_TRUST_ENGINE_HANDOFF.md` 實作。**尚未 commit、未 tag `v0.3-trust`、未 merge。**
+
+### 本階段完成
+
+- **`services/proof/`**：`verifyProofEnvelope()` — 比對 `inputHash`／`quantityTonnesScaled`／`caseId`／`policyProfileId` 公開輸入、nonce 防重放（in-memory）、`circuitId` 與 `PolicyProfile` 綁定、`expiresAt` 過期檢查。`ProofEnvelope.proof` 是 **`demoOnly` sha256 摘要，不是真的 zk-SNARK**（見 README 與 `PHASE3_SESSION_LOG.md` §2 誠實揭露）。
+- **`services/factor-registry/`**：`resolveFactorSet()` — 3 筆 Demo 記錄（active/revoked/expired），檢查 `status` 與生效期間。
+- **`services/policy-gate/`**：`evaluateGate()` — 組合 factor + proof 結果為 canonical `GateResult`（`decision`／`reasonCodes[]`／`checks[]`／`inputHash`）。
+- **`server/trustAdapter.js`**：新增 `productionEvaluator`（取代預設 unavailable）、`evaluateTrustScenario()`、`getDemoContext()`。模組冷啟動預設走真引擎；`resetEvaluatorForTests()` 刻意保留 Day 2 語意（重置回 unavailable），不破壞既有測試契約。
+- **`fixtures/normal.json`**：`policyProfile.circuitId` 從 `null` 改為 `"cbam-demo-qty-v1"`（§8 要求，不影響 carbon-core）。
+- **攻擊矩陣**（`tests/trust/smoke.js`，19 項，`npm run smoke:trust`）：normal→`GATE_OK`；`tampered_quantity`(100→120)→`PUBLIC_INPUT_MISMATCH`；`replayed`→`NONCE_REUSED`；`revoked`→`AUTHORIZATION_REVOKED`；`expiry`→`PROOF_EXPIRED`；nonce 缺失→`PROOF_INVALID`；`wrong_factor`→`FACTOR_NOT_ALLOWED`；`missing_period`→`NEEDS_EVIDENCE`/`EVIDENCE_PERIOD_INCOMPLETE`。另含 E2E：normal fixture 經真實 HTTP＋正式 evaluator（非 mock）revalidate 到 `READY_FOR_VERIFIER`。
+- **交棒文件**：`docs/handoff/PHASE3_SESSION_LOG.md`；README 新增「Day 3 Trust Engine」段落。
+
+### 本階段刻意不做
+
+- **真正的 zk-SNARK proving**（Circom/snarkjs、trusted setup）——依 hand-off §13 Cut Plan 自己的 fallback 條款，時間不夠時允許 mock verifier，但 reasonCodes／checks／inputHash 契約必須真（已做到）。
+- Evidence Agent（Day 4）；正式 Factor/Policy Registry 治理（目前 3 筆寫死 Demo 記錄）。
+- 原始《8/24–8/28 雙人落地分工計畫》p.9 的「批次重放（SHIP-A Proof 送到 SHIP-B）→`PROOF_CONTEXT_MISMATCH`」情境——目前架構的 Proof 綁定在案件層級（兩批出貨合計的 `CalculationReceipt.inputHash`），不是逐批次獨立綁定，這個情境無法乾淨測試，是 master plan 與後來 Vibe Coding AI 規格 case-level 架構之間的落差，留待 A/B 討論是否需要調整資料模型。
+
+### 已知限制
+
+- `smoke:workflow` 回歸基準線本來就是 49/50（`tests/ui/static-contract.js` 1 項既有失敗跟 `_backups/` gitignore 有關，非 Day 3 造成，已回報 A）。
+- 沒有建立 `circuits/`（Circom）目錄；ZKP 部分完全是 §13 fallback 的 demoOnly 檢查。
+- Git tag `v0.3-trust` 未建立（PR #3／#4 都還沒 merge main，比照 Day 1/2 先例，等 merge 順序決定後再打 tag）。
+
+### 驗收命令
+
+```bash
+npm run smoke:carbon-core   # 36/36
+npm run smoke:workflow      # 34/34 + 15/16（1 項既有失敗，見上）
+npm run smoke:trust         # 19/19
+npm run dev:cf               # Worker Ready，revalidate 可用
+```
+
+---
+
 ## Day 2 — 案件工作流 + 三角色 UI + Demo Vault + Trust hook（2026-08-24～25，working tree 未 commit）
 
 分支 `feature/case-workflow-ui`；依《8/24–8/28 雙人落地分工計畫》Day 2 與 Vibe 規格 p.9／p.13 實作。**尚未 commit、未 tag `v0.2-workflow`、未 merge。**

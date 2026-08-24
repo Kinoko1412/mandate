@@ -60,7 +60,7 @@
     "reportingYear": 2026,
     "allowedFactorSets": ["CBAM-DEMO-2026-v1"],
     "requiredEvidence": ["electricity_bill", "fuel_ledger", "production_report", "precursor_list"],
-    "circuitId": null,
+    "circuitId": "cbam-demo-qty-v1",
     "status": "active",
     "version": "1"
   },
