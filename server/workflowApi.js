@@ -8,6 +8,7 @@ const {
 } = require('./carbonAdapter');
 const trustAdapter = require('./trustAdapter');
 const agentAdapter = require('./agentAdapter');
+const { ROLES: DPP_ROLES, buildLayeredDisclosure } = require('../services/dpp');
 
 const MAX_EVIDENCE_BYTES = 512 * 1024;
 const MAX_EVIDENCE_PER_CASE = 16;
@@ -1096,9 +1097,34 @@ async function handleWorkflowApi(method, pathname, body = {}, context = {}) {
   return fail(404, 'API_NOT_FOUND', '找不到 workflow API。', { path: pathname });
 }
 
+/**
+ * GS1/DPP 分層揭露最小示意（services/dpp，Day 5 背景待辦 2）。刻意獨立於
+ * handleWorkflowApi() 之外、不經過它的 requireActor() 認證閘門——public/customer/customs
+ * 是「產品護照的外部查詢者」這條軸線，跟案件參與者的 x-demo-role 是不同概念，這裡刻意
+ * 示範「同一筆 Case 依角色回傳不同欄位子集」本身，不是要重做一套認證機制。純讀取，不影響
+ * Gate/Policy、不產生稽核事件。呼叫端（server/apiFetch.js）要在 handleWorkflowApi() 之前
+ * 呼叫這個函式。
+ */
+function handleDppApi(method, pathname, context = {}) {
+  const dppMatch = pathname.match(/^\/api\/dpp\/cases\/([^/]+)$/);
+  if (!(method === 'GET' && dppMatch)) return null;
+  const caseId = decodeURIComponent(dppMatch[1]);
+  const role = String(context.dppRole || 'public').trim().toLowerCase();
+  if (!DPP_ROLES.includes(role)) {
+    return fail(400, 'DPP_ROLE_INVALID', `role 必須是 ${DPP_ROLES.join('/')} 其中一種。`, { role });
+  }
+  const caseRecord = workflowStore.getCase(caseId);
+  if (!caseRecord) {
+    return fail(404, 'CASE_NOT_FOUND', '找不到這筆案件。', { caseId });
+  }
+  const carbon = workflowStore.getCarbon(caseId);
+  return ok(200, buildLayeredDisclosure({ caseRecord, outwardStatus: outwardStatus(caseRecord.status), carbon, role }));
+}
+
 module.exports = {
   ALLOWED_MEDIA_TYPES,
   MAX_EVIDENCE_PER_CASE,
   MAX_EVIDENCE_BYTES,
   handleWorkflowApi,
+  handleDppApi,
 };

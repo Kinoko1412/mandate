@@ -70,6 +70,12 @@ const REASON_CODE = Object.freeze({
   CALCULATION_OVERFLOW: 'CALCULATION_OVERFLOW', // 「溢位」
   MISSING_CALCULATION_CONTEXT: 'MISSING_CALCULATION_CONTEXT', // buildCalculationReceipt「缺 policy／factor／context」
   INTENSITY_MISMATCH: 'INTENSITY_MISMATCH',
+
+  // --- NOT IN SPEC：Day 5 services/identity（vLEI 風格身份鏈驗證）自行補上 ---
+  // AUTHORIZATION_REVOKED／AUTHORIZATION_INVALID 兩個既有 spec 代碼語意夠通用，法人／角色
+  // 憑證撤銷沿用 AUTHORIZATION_REVOKED；缺憑證、I2I 指標檢查失敗這類「鏈本身斷掉」沿用
+  // AUTHORIZATION_INVALID。這裡只補 spec 沒有、但需要跟「撤銷」「斷鏈」區分開的一種情況：
+  IDENTITY_CREDENTIAL_EXPIRED: 'IDENTITY_CREDENTIAL_EXPIRED', // 法人或角色憑證過期（不是被撤銷，是時間到）
 });
 
 const FACTOR_PURPOSE = Object.freeze({

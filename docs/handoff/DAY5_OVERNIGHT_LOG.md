@@ -92,4 +92,33 @@
   確實是確定性程式碼在判斷（不是 LLM 自己講的）、API key 清空時正確自動退回規則引擎。
 - **既有 165+6 項測試重跑確認零回歸**。
 
-### 3-4. 背景待辦 1（vLEI）／背景待辦 2（GS1/DPP）— 待做，接下來處理
+### 3. 背景待辦 1——vLEI 身份驗證接進新 canonical schema — ✅ 完成
+
+- `services/identity/index.js`：全新實作（不是舊 fork 復原），參考 `_reference/vlei-old-fork/
+  vleiCheck.js` 的判斷精神（法人憑證＋角色憑證、I2I 指標檢查、撤銷連鎖），用跟
+  `services/factor-registry`／`services/policy-gate` 一致的模式（checks/reasonCodes、demo
+  registry、期望值由系統重建不信任呼叫端宣稱）重寫。
+- 對齊 Day 3 GateResult 慣例：`{decision, reasonCodes, checks, evaluatedAt, inputHash}`。
+- 新增一個 REASON_CODE（`IDENTITY_CREDENTIAL_EXPIRED`），其餘沿用既有的
+  `AUTHORIZATION_REVOKED`/`AUTHORIZATION_INVALID`。
+- `tests/identity/smoke.js`（`npm run smoke:identity`）：8/8 全過，含正常鏈、未知 actor、
+  撤銷連鎖（且驗證「呼叫端謊稱沒被撤銷」也會被正確擋下，不信任宣稱值）、過期、偽造
+  credentialRefs、orgId 冒用、格式錯誤、決定性。
+- **還沒接進 `services/policy-gate` 判斷鏈**——獨立可用、獨立測試過，要不要讓身份驗證結果
+  影響 Gate 是需要 A/B 一起決定的範圍問題，`services/identity/README.md` 有記錄。
+
+### 4. 背景待辦 2——GS1/DPP 分層揭露最小示意 — ✅ 完成
+
+- `services/dpp/index.js`：純函式，`GET /api/dpp/cases/:id?role=public|customer|customs`。
+- **關鍵設計決定**：這個端點刻意不用既有 `x-demo-role` 認證（`handleWorkflowApi()` 會強制
+  要求），因為 public/customer/customs 是「產品護照外部查詢者」這條軸線，跟案件參與者角色
+  是不同概念——`server/apiFetch.js` 新增 `handleDppApi()` 呼叫，排在 `handleWorkflowApi()`
+  之前，繞開它的認證閘門（原本想直接塞進 `handleWorkflowApi()` 裡，發現它的
+  `isWorkflowRoute`/`requireActor` 兩道閘門會擋掉沒有 `x-demo-role` 的請求，這樣就沒辦法做
+  出真正的「public 層免認證」，所以改成獨立函式）。
+- 三層揭露：`public`(狀態+合規布林值,不露數字) → `customer`(+碳足跡強度) →
+  `customs`(+實際vs預設係數比較,等同既有 Importer 摘要深度)。
+- `tests/dpp/smoke.js`（`npm run smoke:dpp`）：7/7 全過，含「不帶任何角色/認證資訊也能查」
+  「三層資料一致不矛盾」「無效角色拒絕」「案件不存在 404」「不影響既有 API 仍要求
+  x-demo-role」。
+- **既有全部測試（165+6+5+8+7=191 項）重跑確認零回歸**。

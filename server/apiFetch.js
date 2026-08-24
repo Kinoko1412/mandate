@@ -16,7 +16,7 @@ const { checkPcfPayload, buildSupplementLetter } = require('./pcfCheck');
 const { plainReason } = require('./plainReason');
 const supabaseSync = require('./supabaseSync');
 const pactMapping = require('./pactMapping');
-const { handleWorkflowApi } = require('./workflowApi');
+const { handleWorkflowApi, handleDppApi } = require('./workflowApi');
 
 function buildActor(body) {
   const st = store.getState();
@@ -155,6 +155,10 @@ function runPolicySimulate(body) {
 
 async function handleApiPath(method, pathname, body, requestContext) {
   const reqBody = body || {};
+  // GS1/DPP 分層揭露示意刻意不經過 handleWorkflowApi() 的 x-demo-role 認證閘門（見
+  // server/workflowApi.js handleDppApi() 開頭註解），所以要在它之前檢查。
+  const dppResult = handleDppApi(method, pathname, requestContext || {});
+  if (dppResult) return dppResult;
   const workflowResult = await handleWorkflowApi(
     method,
     pathname,
@@ -600,6 +604,9 @@ async function handleFetchRequest(request) {
     demoRole: request.headers.get('x-demo-role') || url.searchParams.get('demoRole'),
     // Keep Vault credentials out of URLs and query logs.
     vaultToken: request.headers.get('x-vault-token'),
+    // GS1/DPP 分層揭露示意（services/dpp）：public/customer/customs，跟上面的
+    // demoRole（案件參與者角色）是不同軸線，故意分開一個查詢參數。
+    dppRole: url.searchParams.get('role'),
   };
 
   if (!pathname.startsWith('/api/')) {

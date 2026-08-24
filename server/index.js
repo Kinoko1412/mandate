@@ -116,6 +116,9 @@ const server = http.createServer(async (req, res) => {
         demoRole: req.headers['x-demo-role'] || url.searchParams.get('demoRole'),
         // Keep Vault credentials out of URLs and query logs.
         vaultToken: req.headers['x-vault-token'],
+        // GS1/DPP 分層揭露示意（services/dpp）：public/customer/customs，跟上面的
+        // demoRole（案件參與者角色）是不同軸線，故意分開一個查詢參數。
+        dppRole: url.searchParams.get('role'),
       });
       return;
     }
