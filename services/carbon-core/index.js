@@ -15,7 +15,10 @@
 
 const crypto = require('crypto');
 const { CASE_STATUS, GATE_DECISION, REASON_CODE, VERIFICATION_STATUS } = require('../../packages/contracts/enums');
-const { toScaled, fromScaled, mulScaled, addScaled } = require('../../packages/contracts/fixedPoint');
+const { SCALE, toScaled, fromScaled, mulScaled, addScaled, divScaled } = require('../../packages/contracts/fixedPoint');
+
+const METHOD_VERSION = 'sum-activity-factor-v1';
+const ROUNDING_RULE = 'ROUND_HALF_UP_TO_NEAREST_SCALED_INTEGER';
 
 class CarbonCoreError extends Error {
   constructor(reasonCode, message) {
@@ -128,27 +131,67 @@ function validateInstallationYear(input) {
 // calculateAnnualEmissions / calculateIntensity
 // ---------------------------------------------------------------------------
 
-/**
- * sum(activity * factor)（規格 p.10）。單一製程 Demo 情境下，activity=productionTonnes、
- * factor=verifiedIntensity，等同 sum 只有一項——多製程/多 precursor 分項加總留給之後
- * 有真實 BOM 資料時再擴充，不在 Phase 1 硬做假的分項。
- * 拒絕條件：factor 不允許（由呼叫方帶 policyProfile 才檢查，見 allocateShipment）、
- * 溢位（mulScaled 內建溢位偵測）、缺必要項（validateInstallationYear 已檔）。
- */
-function calculateAnnualEmissions(rawInstallationYear) {
-  const installationYear = validateInstallationYear(rawInstallationYear);
-  const intensityScaled = toScaled(installationYear.verifiedIntensity);
-  const productionScaled = toScaled(installationYear.productionTonnes);
-  const totalEmissionsScaled = mulScaled(productionScaled, intensityScaled);
+/** sum(activity × referenced factor)，全程以 SCALE=10^6 定點整數計算。 */
+function calculateAnnualEmissions({ activities, factorSet, policyProfile } = {}) {
+  if (!Array.isArray(activities) || activities.length === 0 || !factorSet || !Array.isArray(factorSet.factors)) {
+    throw new CarbonCoreError(REASON_CODE.MISSING_CALCULATION_CONTEXT, 'activities 與含 factors 的 factorSet 皆為必填');
+  }
+  if (!policyProfile || !Array.isArray(policyProfile.allowedFactorSets)) {
+    throw new CarbonCoreError(REASON_CODE.MISSING_CALCULATION_CONTEXT, 'policyProfile.allowedFactorSets 為必填');
+  }
+  if (!policyProfile.allowedFactorSets.includes(factorSet.factorSetId) || factorSet.status !== 'active') {
+    throw new CarbonCoreError(REASON_CODE.FACTOR_NOT_ALLOWED, `factorSetId ${factorSet.factorSetId} 不在允許清單或不是 active`);
+  }
+
+  const factorsByRef = new Map(factorSet.factors.map((factor) => [factor.factorRef, factor]));
+  const terms = [];
+  let totalEmissionsScaled = 0;
+
+  try {
+    for (const activity of activities) {
+      if (!activity || typeof activity !== 'object' || !activity.factorRef) {
+        throw new CarbonCoreError(REASON_CODE.MISSING_CALCULATION_CONTEXT, '每筆 activity 都必須包含 factorRef');
+      }
+      const factor = factorsByRef.get(activity.factorRef);
+      if (!factor) {
+        throw new CarbonCoreError(REASON_CODE.MISSING_CALCULATION_CONTEXT, `找不到 factorRef ${activity.factorRef}`);
+      }
+      if (typeof activity.quantity !== 'number' || !Number.isFinite(activity.quantity) || activity.quantity < 0 ||
+          typeof factor.value !== 'number' || !Number.isFinite(factor.value) || factor.value < 0) {
+        throw new CarbonCoreError(REASON_CODE.ZERO_OR_NEGATIVE_QUANTITY, 'activity quantity 與 factor value 必須是非負有限數字');
+      }
+      if (!activity.unit || activity.unit !== factor.activityUnit || factor.emissionsUnit !== 'tCO2e') {
+        throw new CarbonCoreError(
+          REASON_CODE.UNKNOWN_UNIT,
+          `activity ${activity.activityId || '<unknown>'} 單位 ${activity.unit} 與 factor ${factor.factorRef} 的 ${factor.activityUnit}/${factor.emissionsUnit} 不相容`
+        );
+      }
+
+      const activityScaled = toScaled(activity.quantity);
+      const factorScaled = toScaled(factor.value);
+      const emissionsScaled = mulScaled(activityScaled, factorScaled);
+      totalEmissionsScaled = addScaled(totalEmissionsScaled, emissionsScaled);
+      terms.push({
+        activityId: activity.activityId,
+        factorRef: factor.factorRef,
+        activityScaled,
+        factorScaled,
+        emissionsScaled,
+      });
+    }
+  } catch (error) {
+    if (error instanceof CarbonCoreError) throw error;
+    if (error instanceof RangeError) {
+      throw new CarbonCoreError(REASON_CODE.CALCULATION_OVERFLOW, error.message);
+    }
+    throw error;
+  }
 
   return {
     totalEmissionsScaled,
     totalEmissions: fromScaled(totalEmissionsScaled),
     unit: 'tCO2e',
-    basis: {
-      productionTonnes: installationYear.productionTonnes,
-      verifiedIntensity: installationYear.verifiedIntensity,
-    },
+    basis: { factorSetId: factorSet.factorSetId, terms },
   };
 }
 
@@ -157,14 +200,21 @@ function calculateAnnualEmissions(rawInstallationYear) {
  * 拒絕條件：零產量（validateInstallationYear 已檔）、精度未定義（固定用
  * packages/contracts/fixedPoint 的 SCALE，不會有精度未定義的情況）。
  */
-function calculateIntensity(rawInstallationYear) {
-  const { totalEmissionsScaled } = calculateAnnualEmissions(rawInstallationYear);
-  const installationYear = validateInstallationYear(rawInstallationYear);
-  const productionScaled = toScaled(installationYear.productionTonnes);
-
-  // 定點除法：(a * SCALE) / b，四捨五入。
-  const { SCALE } = require('../../packages/contracts/fixedPoint');
-  const intensityScaled = Math.round((totalEmissionsScaled * SCALE) / productionScaled);
+function calculateIntensity({ annualEmissions, productionTonnes } = {}) {
+  assertPositiveNumber(productionTonnes, REASON_CODE.ZERO_OR_NEGATIVE_QUANTITY, 'productionTonnes');
+  const totalEmissionsScaled = annualEmissions && Number.isSafeInteger(annualEmissions.totalEmissionsScaled)
+    ? annualEmissions.totalEmissionsScaled
+    : toScaled(annualEmissions);
+  if (totalEmissionsScaled < 0) {
+    throw new CarbonCoreError(REASON_CODE.ZERO_OR_NEGATIVE_QUANTITY, 'annualEmissions 不可為負數');
+  }
+  const productionScaled = toScaled(productionTonnes);
+  let intensityScaled;
+  try {
+    intensityScaled = divScaled(totalEmissionsScaled, productionScaled);
+  } catch (error) {
+    throw new CarbonCoreError(REASON_CODE.CALCULATION_OVERFLOW, error.message);
+  }
 
   return {
     intensityScaled,
@@ -404,7 +454,7 @@ function allocateAllShipments({ installationYear, shipments, policyProfile } = {
  * 輸入 Hash、方法／factor 版本、結果、時間（規格 p.10）。
  * 拒絕條件：缺 policy／factor／context。
  */
-function buildCalculationReceipt({ installationYear: rawInstallationYear, factorSet, policyProfile } = {}) {
+function buildCalculationReceipt({ installationYear: rawInstallationYear, activities, factorSet, policyProfile } = {}) {
   if (!factorSet || !factorSet.factorSetId) {
     throw new CarbonCoreError(REASON_CODE.MISSING_CALCULATION_CONTEXT, 'buildCalculationReceipt 缺少 factorSet');
   }
@@ -412,9 +462,42 @@ function buildCalculationReceipt({ installationYear: rawInstallationYear, factor
     throw new CarbonCoreError(REASON_CODE.MISSING_CALCULATION_CONTEXT, 'buildCalculationReceipt 缺少 policyProfile');
   }
   const installationYear = validateInstallationYear(rawInstallationYear);
-  const { totalEmissionsScaled, totalEmissions } = calculateAnnualEmissions(installationYear);
-
-  const inputHash = sha256Hex({ installationYear, factorSetId: factorSet.factorSetId, policyProfileId: policyProfile.policyProfileId });
+  const calculation = calculateAnnualEmissions({ activities, factorSet, policyProfile });
+  const metadata = {
+    factor: {
+      factorSetId: factorSet.factorSetId,
+      version: factorSet.version,
+      sourceHash: factorSet.sourceHash,
+    },
+    policy: {
+      policyProfileId: policyProfile.policyProfileId,
+      version: policyProfile.version,
+    },
+    scale: SCALE,
+    roundingRule: ROUNDING_RULE,
+    methodVersion: METHOD_VERSION,
+  };
+  if (!metadata.factor.version || !metadata.factor.sourceHash || !metadata.policy.version) {
+    throw new CarbonCoreError(REASON_CODE.MISSING_CALCULATION_CONTEXT, 'factor version/sourceHash 與 policy version 皆為必填');
+  }
+  const hashInput = {
+    installationYear,
+    activities,
+    factorSet: {
+      factorSetId: factorSet.factorSetId,
+      version: factorSet.version,
+      sourceHash: factorSet.sourceHash,
+      status: factorSet.status,
+      factors: factorSet.factors,
+    },
+    policyProfile: {
+      policyProfileId: policyProfile.policyProfileId,
+      version: policyProfile.version,
+      allowedFactorSets: policyProfile.allowedFactorSets,
+    },
+    metadata,
+  };
+  const inputHash = sha256Hex(hashInput);
 
   return {
     inputHash,
@@ -422,7 +505,11 @@ function buildCalculationReceipt({ installationYear: rawInstallationYear, factor
     reportingYear: installationYear.reportingYear,
     policyProfileId: policyProfile.policyProfileId,
     factorSetId: factorSet.factorSetId,
-    result: { totalEmissionsScaled, totalEmissions },
+    metadata,
+    result: {
+      totalEmissionsScaled: calculation.totalEmissionsScaled,
+      totalEmissions: calculation.totalEmissions,
+    },
     computedAt: new Date().toISOString(),
   };
 }

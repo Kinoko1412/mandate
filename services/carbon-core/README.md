@@ -14,7 +14,7 @@ node tests/carbon-core/smoke.js
 npm run smoke:carbon-core
 ```
 
-看到 `RESULT: all PASS` 代表核心邏輯正常（目前 21 項測試）。
+看到 `RESULT: all PASS` 代表契約與核心邏輯正常。
 
 ## 資料模型（Canonical Data Model，逐字對照規格 p.7）
 
@@ -22,7 +22,7 @@ npm run smoke:carbon-core
 - **Shipment**（交易分攤層）：`shipmentId`、`caseId`、`installationId`、`reportingYear`、`quantityTonnes`、`allocatedEmissions`、`allocationStatus`。
 - **GateResult**：`decision`、`reasonCodes`（**陣列**）、`checks`、`policyProfileId`、`evaluatedAt`、`inputHash`。
 
-完整欄位定義見 `packages/contracts/schema-v1.json`；狀態/reason code 常數見 `packages/contracts/enums.js`；定點數 scale 常數見 `packages/contracts/fixedPoint.js`。
+完整欄位定義見 `packages/contracts/schema-v1.json`；`packages/contracts/validator.js` 會在執行期實際載入該 schema，並驗證 required/type/enum/數值下界；狀態/reason code 常數見 `packages/contracts/enums.js`；定點數 scale 常數見 `packages/contracts/fixedPoint.js`。
 
 **數值規則**：後端全程用定點整數（`SCALE = 10^6`）運算，不在中間步驟用浮點小數——這是為了跟未來 `circuits/`（Circom 電路內完全沒有浮點數）共用同一 scale，規格 p.10 明講「不可混用浮點」。`toScaled`/`fromScaled` 只在輸入/輸出邊界轉換一次。
 
@@ -46,13 +46,15 @@ const {
 | 函式 | 必要行為 | 拒絕條件 |
 |---|---|---|
 | `validateInstallationYear(input)` | 驗年度、產量、邊界、路線、單位 | 錯年度、未知單位、負數、零產量 |
-| `calculateAnnualEmissions(installationYear)` | `productionTonnes × verifiedIntensity`（單一製程情境下等同 `sum(activity*factor)` 的單項特例） | factor 不允許（由 `allocateShipment` 的 policyProfile 檢查負責）、溢位、缺必要項 |
-| `calculateIntensity(installationYear)` | `annual emissions ÷ production tonnes` | 零產量、精度未定義（固定用同一 SCALE，不會發生） |
+| `calculateAnnualEmissions({ activities, factorSet, policyProfile })` | 依每筆 `factorRef` 計算並加總 `activity.quantity × factor.value`；保存定點 terms | factor 不允許、負數、未知單位、缺 factor、溢位 |
+| `calculateIntensity({ annualEmissions, productionTonnes })` | `annual emissions ÷ production tonnes`，不讀既有 `verifiedIntensity` 回算 | 零產量、負數、溢位 |
 | `allocateShipment({ installationYear, shipment, policyProfile })` | 單一批次自身合法性：case context、供應商已確認、證據涵蓋期間、數量/單位、係數允許清單 | 來源不一致（`CASE_CONTEXT_MISMATCH`）——**不檢查跨批次累計超額**，那是下一個函式的責任 |
 | `reconcileAllocationLedger({ installationYear, allocations })` | 檢查累積數量與重複分配 | 超出年度產量（`ALLOCATION_EXCEEDS_PRODUCTION`）、重複 shipmentId（`DUPLICATE_SHIPMENT_ID`） |
-| `buildCalculationReceipt({ installationYear, factorSet, policyProfile })` | 輸入 Hash（sha256）、方法/factor 版本、結果、時間 | 缺 policy／factor／context |
+| `buildCalculationReceipt({ installationYear, activities, factorSet, policyProfile })` | 輸入 Hash、factor version/sourceHash、policy version/profile、scale、捨入規則、方法版本、結果與時間 | 缺 policy／factor／context |
 
 `allocateAllShipments({ installationYear, shipments, policyProfile })` 是便利函式：依序對每批出貨呼叫 `allocateShipment`，再統一送進 `reconcileAllocationLedger`，回傳 `[{ shipment, gateResult }, ...]`。
+
+介面注意：舊版 `calculateAnnualEmissions(installationYear)`／`calculateIntensity(installationYear)` 會被拒絕，避免再以既有 `verifiedIntensity` 循環算回年度排放。呼叫端必須分別傳入 activities/factor refs，以及已計算的 annual emissions。
 
 ## ⚠️ 規格沒有明確定義、由 carbon-core 自行判斷的地方
 
@@ -63,6 +65,8 @@ const {
 3. **`Shipment.allocationStatus` 的值域**：規格只給欄位名稱，目前用 `CaseStatus` 裡由 Gate 直接可達的子集（`NEEDS_EVIDENCE`／`METHOD_REVIEW`／`READY_FOR_VERIFIER`／`BLOCKED`）。
 4. **`reconcileAllocationLedger` 兩個拒絕條件的 reason code 字串**：規格 p.11 的 Gate Check 表沒有列出對應字串，目前用 `ALLOCATION_EXCEEDS_PRODUCTION`／`DUPLICATE_SHIPMENT_ID`（在 `packages/contracts/enums.js` 裡明確標注「NOT IN SPEC」）。
 5. **年度總產量 200 噸**：兩份出貨量固定是 100+60=160 噸，但規格沒給整年總產量，目前抓一個比出貨量略大的整數方便測試「超額分配」情境，不是真實或官方數字。
+
+normal fixture 的活動量與係數是刻意設計的合成 Demo：`100 MWh × 2 + 80 GJ × 2 = 360 tCO2e`，每筆均有 `demoOnly: true`，不代表官方或真實鋼廠係數。由此再除以 200 tonnes 得 `1.80 tCO2e/tonne`；`verifiedIntensity` 僅作 canonical 記錄與分攤輸入，不再被年度計算拿來循環回算。
 
 ## 已知限制 / 尚未做的事
 

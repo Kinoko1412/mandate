@@ -33,8 +33,8 @@
     { "evidenceId": "EV-PRECURSOR-01", "caseId": "CASE-2026-001", "type": "precursor_list", "fileHash": "sha256:normal-precursor", "coveredFrom": "2026-01-01", "coveredTo": "2026-12-31", "source": "procurement-demo", "version": 1, "humanConfirmed": true, "vaultRef": "vault-demo://CASE-2026-001/EV-PRECURSOR-01" }
   ],
   "shipments": [
-    { "shipmentId": "SHIP-A", "caseId": "CASE-2026-001", "installationId": "TW-STEEL-01", "reportingYear": 2026, "quantityTonnes": 150, "quantityUnit": "tonne", "factorSetId": "CBAM-DEMO-2026-v1", "_note": "原本 Demo 值是 100 噸，這裡竄改成 150 噸" },
-    { "shipmentId": "SHIP-B", "caseId": "CASE-2026-001", "installationId": "TW-STEEL-01", "reportingYear": 2026, "quantityTonnes": 60, "quantityUnit": "tonne", "factorSetId": "CBAM-DEMO-2026-v1" }
+    { "shipmentId": "SHIP-A", "caseId": "CASE-2026-001", "installationId": "TW-STEEL-01", "reportingYear": 2026, "quantityTonnes": 150, "allocatedEmissions": 270, "allocationStatus": "READY_FOR_VERIFIER", "quantityUnit": "tonne", "factorSetId": "CBAM-DEMO-2026-v1", "_note": "原本 Demo 值是 100 噸，這裡竄改成 150 噸" },
+    { "shipmentId": "SHIP-B", "caseId": "CASE-2026-001", "installationId": "TW-STEEL-01", "reportingYear": 2026, "quantityTonnes": 60, "allocatedEmissions": null, "allocationStatus": "BLOCKED", "quantityUnit": "tonne", "factorSetId": "CBAM-DEMO-2026-v1" }
   ],
   "factorSet": {
     "factorSetId": "CBAM-DEMO-2026-v1",

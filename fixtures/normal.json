@@ -32,8 +32,12 @@
     { "evidenceId": "EV-PRECURSOR-01", "caseId": "CASE-2026-001", "type": "precursor_list", "fileHash": "sha256:normal-precursor", "coveredFrom": "2026-01-01", "coveredTo": "2026-12-31", "source": "procurement-demo", "version": 1, "humanConfirmed": true, "vaultRef": "vault-demo://CASE-2026-001/EV-PRECURSOR-01" }
   ],
   "shipments": [
-    { "shipmentId": "SHIP-A", "caseId": "CASE-2026-001", "installationId": "TW-STEEL-01", "reportingYear": 2026, "quantityTonnes": 100, "quantityUnit": "tonne", "factorSetId": "CBAM-DEMO-2026-v1" },
-    { "shipmentId": "SHIP-B", "caseId": "CASE-2026-001", "installationId": "TW-STEEL-01", "reportingYear": 2026, "quantityTonnes": 60, "quantityUnit": "tonne", "factorSetId": "CBAM-DEMO-2026-v1" }
+    { "shipmentId": "SHIP-A", "caseId": "CASE-2026-001", "installationId": "TW-STEEL-01", "reportingYear": 2026, "quantityTonnes": 100, "allocatedEmissions": 180, "allocationStatus": "READY_FOR_VERIFIER", "quantityUnit": "tonne", "factorSetId": "CBAM-DEMO-2026-v1" },
+    { "shipmentId": "SHIP-B", "caseId": "CASE-2026-001", "installationId": "TW-STEEL-01", "reportingYear": 2026, "quantityTonnes": 60, "allocatedEmissions": 108, "allocationStatus": "READY_FOR_VERIFIER", "quantityUnit": "tonne", "factorSetId": "CBAM-DEMO-2026-v1" }
+  ],
+  "activities": [
+    { "activityId": "ACT-DEMO-ELECTRICITY", "quantity": 100, "unit": "MWh", "factorRef": "FACTOR-DEMO-ELECTRICITY", "demoOnly": true },
+    { "activityId": "ACT-DEMO-FUEL", "quantity": 80, "unit": "GJ", "factorRef": "FACTOR-DEMO-FUEL", "demoOnly": true }
   ],
   "factorSet": {
     "factorSetId": "CBAM-DEMO-2026-v1",
@@ -44,6 +48,10 @@
     "effectiveTo": null,
     "sourceHash": "sha256:demo-factorset-v1",
     "status": "active",
+    "factors": [
+      { "factorRef": "FACTOR-DEMO-ELECTRICITY", "value": 2, "activityUnit": "MWh", "emissionsUnit": "tCO2e", "demoOnly": true },
+      { "factorRef": "FACTOR-DEMO-FUEL", "value": 2, "activityUnit": "GJ", "emissionsUnit": "tCO2e", "demoOnly": true }
+    ],
     "demoOnly": true
   },
   "policyProfile": {
@@ -53,7 +61,8 @@
     "allowedFactorSets": ["CBAM-DEMO-2026-v1"],
     "requiredEvidence": ["electricity_bill", "fuel_ledger", "production_report", "precursor_list"],
     "circuitId": null,
-    "status": "active"
+    "status": "active",
+    "version": "1"
   },
   "expected": [
     { "shipmentId": "SHIP-A", "decision": "GATE_OK", "reasonCodes": ["GATE_OK"], "allocatedEmissions": 180 },

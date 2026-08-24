@@ -20,7 +20,11 @@ function assertFiniteNumber(value, label) {
 /** 十進位數字 → 定點整數（四捨五入，避免累積浮點誤差）。 */
 function toScaled(value) {
   assertFiniteNumber(value, 'toScaled(value)');
-  return Math.round(value * SCALE);
+  const scaled = Math.round(value * SCALE);
+  if (!Number.isSafeInteger(scaled)) {
+    throw new RangeError(`toScaled 結果溢位：${value} * ${SCALE}`);
+  }
+  return scaled;
 }
 
 /** 定點整數 → 十進位數字（僅供顯示／人類可讀輸出使用，不可再拿去參與定點運算）。 */
@@ -54,10 +58,25 @@ function addScaled(aScaled, bScaled) {
   return sum;
 }
 
+/** 兩個定點整數相除，結果維持同一 SCALE 並採四捨五入。 */
+function divScaled(aScaled, bScaled) {
+  assertFiniteNumber(aScaled, 'divScaled(aScaled)');
+  assertFiniteNumber(bScaled, 'divScaled(bScaled)');
+  if (!Number.isSafeInteger(aScaled) || !Number.isSafeInteger(bScaled) || bScaled === 0) {
+    throw new RangeError(`divScaled 輸入無效或溢位：${aScaled} / ${bScaled}`);
+  }
+  const numerator = aScaled * SCALE;
+  if (!Number.isSafeInteger(numerator)) {
+    throw new RangeError(`divScaled 中間值溢位：${aScaled} * ${SCALE}`);
+  }
+  return Math.round(numerator / bScaled);
+}
+
 module.exports = {
   SCALE,
   toScaled,
   fromScaled,
   mulScaled,
   addScaled,
+  divScaled,
 };

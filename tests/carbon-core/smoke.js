@@ -19,6 +19,7 @@ const {
   CarbonCoreError,
 } = require('../../services/carbon-core');
 const { toScaled, fromScaled, mulScaled } = require('../../packages/contracts/fixedPoint');
+const { schema, validateCanonical } = require('../../packages/contracts/validator');
 
 const normalFixture = require('../../fixtures/normal.json');
 const missingPeriodFixture = require('../../fixtures/missing_period.json');
@@ -43,6 +44,15 @@ function runFixture(fixture) {
     installationYear: fixture.installationYear,
     shipments: fixture.shipments,
     policyProfile: fixture.policyProfile,
+  });
+}
+
+function calculateNormalAnnual(overrides = {}) {
+  return calculateAnnualEmissions({
+    activities: normalFixture.activities,
+    factorSet: normalFixture.factorSet,
+    policyProfile: normalFixture.policyProfile,
+    ...overrides,
   });
 }
 
@@ -77,26 +87,190 @@ function assertResults(results, expectedList) {
   });
 }
 
+// ---- Contract：實際載入 schema-v1.json，驗 11 個 canonical entities ----
+
+const normalReceipt = buildCalculationReceipt({
+  installationYear: normalFixture.installationYear,
+  activities: normalFixture.activities,
+  factorSet: normalFixture.factorSet,
+  policyProfile: normalFixture.policyProfile,
+});
+
+const canonicalEntities = {
+  Case: normalFixture.case,
+  InstallationYear: normalFixture.installationYear,
+  Shipment: normalFixture.shipments[0],
+  EvidenceItem: normalFixture.evidenceItems[0],
+  IdentityContext: {
+    actorId: 'ACTOR-DEMO', orgId: 'ORG-TW-STEEL-SUPPLIER', role: 'Supplier',
+    assuranceLevel: 'demo', credentialRefs: [], mandateId: null, expiresAt: null, revocationStatus: 'active',
+  },
+  FactorSet: normalFixture.factorSet,
+  PolicyProfile: normalFixture.policyProfile,
+  ProofEnvelope: {
+    proofId: 'PROOF-DEMO', circuitId: 'CIRCUIT-DEMO', publicInputs: {}, proof: 'demo',
+    nonce: 'NONCE-DEMO', expiresAt: '2026-12-31T23:59:59Z', verificationKeyId: 'VK-DEMO',
+  },
+  GateResult: {
+    decision: 'GATE_OK', reasonCodes: ['GATE_OK'], checks: [{ name: 'contract', status: 'pass' }],
+    policyProfileId: 'CBAM-STEEL-2026-v1', evaluatedAt: '2026-08-24T09:00:00Z', inputHash: 'demo-hash',
+  },
+  RiskReport: {
+    findings: [], missingEvidence: [], discrepancies: [], citations: [],
+    modelVersion: 'demo', promptVersion: 'demo', reviewStatus: 'human-review-required',
+  },
+  CalculationReceipt: normalReceipt,
+};
+
+check('contract: validator 實際載入 schema-v1.json 並通過 11 個 canonical entities', () => {
+  assert.strictEqual(schema.$id, 'mandate/schema-v1');
+  assert.strictEqual(Object.keys(canonicalEntities).length, 11);
+  for (const [entityName, value] of Object.entries(canonicalEntities)) {
+    assert.deepStrictEqual(validateCanonical(entityName, value), { valid: true, errors: [] }, entityName);
+  }
+});
+
+check('contract: 11 個 canonical entities 缺 required 欄位皆失敗', () => {
+  for (const [entityName, value] of Object.entries(canonicalEntities)) {
+    const requiredField = schema.definitions[entityName].required[0];
+    const invalid = { ...value };
+    delete invalid[requiredField];
+    assert.strictEqual(validateCanonical(entityName, invalid).valid, false, `${entityName}.${requiredField}`);
+  }
+});
+
+check('contract: 11 個 canonical entities 錯 type 皆失敗', () => {
+  const fields = {
+    Case: 'caseId', InstallationYear: 'reportingYear', Shipment: 'quantityTonnes', EvidenceItem: 'version',
+    IdentityContext: 'credentialRefs', FactorSet: 'issuer', PolicyProfile: 'cnCodes', ProofEnvelope: 'publicInputs',
+    GateResult: 'reasonCodes', RiskReport: 'findings', CalculationReceipt: 'inputHash',
+  };
+  for (const [entityName, field] of Object.entries(fields)) {
+    const original = canonicalEntities[entityName][field];
+    const invalid = { ...canonicalEntities[entityName], [field]: Array.isArray(original) || typeof original === 'object' ? 'wrong' : [] };
+    assert.strictEqual(validateCanonical(entityName, invalid).valid, false, `${entityName}.${field}`);
+  }
+});
+
+check('contract: schema enum 未知值失敗', () => {
+  const enumFields = {
+    Case: 'status', InstallationYear: 'verificationStatus', Shipment: 'allocationStatus',
+    EvidenceItem: 'type', IdentityContext: 'role', FactorSet: 'purpose',
+    PolicyProfile: 'status', GateResult: 'decision',
+  };
+  for (const [entityName, field] of Object.entries(enumFields)) {
+    const invalid = { ...canonicalEntities[entityName], [field]: 'UNKNOWN_ENUM' };
+    assert.strictEqual(validateCanonical(entityName, invalid).valid, false, `${entityName}.${field}`);
+  }
+});
+
+check('contract: schema 數值下界拒絕負數', () => {
+  assert.strictEqual(validateCanonical('InstallationYear', { ...canonicalEntities.InstallationYear, productionTonnes: -1 }).valid, false);
+  assert.strictEqual(validateCanonical('Shipment', { ...canonicalEntities.Shipment, quantityTonnes: -1 }).valid, false);
+});
+
+check('contract: 四個 fixtures 的六類核心 canonical entities 全部通過', () => {
+  for (const fixture of [
+    normalFixture,
+    missingPeriodFixture,
+    wrongFactorFixture,
+    tamperedQuantityFixture,
+  ]) {
+    const entities = {
+      Case: [fixture.case],
+      InstallationYear: [fixture.installationYear],
+      Shipment: fixture.shipments,
+      EvidenceItem: fixture.evidenceItems,
+      FactorSet: [fixture.factorSet],
+      PolicyProfile: [fixture.policyProfile],
+    };
+    for (const [entityName, values] of Object.entries(entities)) {
+      for (const value of values) {
+        assert.deepStrictEqual(
+          validateCanonical(entityName, value),
+          { valid: true, errors: [] },
+          `${fixture.description}: ${entityName}`
+        );
+      }
+    }
+  }
+});
+
 // ---- Fixture 端到端測試（對應規格 p.8 固定 Demo Fixture + 必備異常 Fixture） ----
 
 check('normal fixture: SHIP-A/SHIP-B 都 GATE_OK，分攤數字正確（100x1.80=180, 60x1.80=108）', () => {
   assertResults(runFixture(normalFixture), normalFixture.expected);
 });
 
-check('normal fixture: 年度總排放 = 1.80 x 200 = 360', () => {
-  const { totalEmissions } = calculateAnnualEmissions(normalFixture.installationYear);
+check('normal fixture: 年度總排放 = sum(activity × factor) = 100×2 + 80×2 = 360', () => {
+  const { totalEmissions } = calculateNormalAnnual();
   assert.strictEqual(totalEmissions, normalFixture.expectedAnnualEmissions);
 });
 
 check('normal fixture: calculateIntensity 反推回 1.80（annual emissions ÷ production tonnes）', () => {
-  const { intensity } = calculateIntensity(normalFixture.installationYear);
+  const { intensity } = calculateIntensity({
+    annualEmissions: calculateNormalAnnual(),
+    productionTonnes: normalFixture.installationYear.productionTonnes,
+  });
   assert.strictEqual(intensity, normalFixture.installationYear.verifiedIntensity);
 });
 
 check('normal fixture: 固定輸入重算 3 次結果完全一致', () => {
-  const runs = [1, 2, 3].map(() => calculateAnnualEmissions(normalFixture.installationYear).totalEmissions);
+  const runs = [1, 2, 3].map(() => calculateNormalAnnual().totalEmissions);
   assert.strictEqual(runs[0], runs[1]);
   assert.strictEqual(runs[1], runs[2]);
+});
+
+check('calculateAnnualEmissions: 真正加總 activity × factor 並保存 factor refs', () => {
+  const result = calculateNormalAnnual();
+  assert.deepStrictEqual(result.basis.terms.map((term) => term.factorRef), ['FACTOR-DEMO-ELECTRICITY', 'FACTOR-DEMO-FUEL']);
+  assert.deepStrictEqual(result.basis.terms.map((term) => fromScaled(term.emissionsScaled)), [200, 160]);
+});
+
+check('calculateAnnualEmissions: 舊版 installationYear-only 循環呼叫應明確拒絕', () => {
+  assert.throws(
+    () => calculateAnnualEmissions(normalFixture.installationYear),
+    (error) => error instanceof CarbonCoreError && error.reasonCode === 'MISSING_CALCULATION_CONTEXT'
+  );
+});
+
+check('calculateAnnualEmissions: factorSet 不在 policy 允許清單應拒絕', () => {
+  assert.throws(
+    () => calculateNormalAnnual({ policyProfile: { ...normalFixture.policyProfile, allowedFactorSets: [] } }),
+    (error) => error instanceof CarbonCoreError && error.reasonCode === 'FACTOR_NOT_ALLOWED'
+  );
+});
+
+check('calculateAnnualEmissions: 負數 activity 應拒絕', () => {
+  const activities = normalFixture.activities.map((activity, index) => index === 0 ? { ...activity, quantity: -1 } : activity);
+  assert.throws(
+    () => calculateNormalAnnual({ activities }),
+    (error) => error instanceof CarbonCoreError && error.reasonCode === 'ZERO_OR_NEGATIVE_QUANTITY'
+  );
+});
+
+check('calculateAnnualEmissions: 缺 factorRef 對應項應拒絕', () => {
+  const activities = [{ ...normalFixture.activities[0], factorRef: 'FACTOR-MISSING' }];
+  assert.throws(
+    () => calculateNormalAnnual({ activities }),
+    (error) => error instanceof CarbonCoreError && error.reasonCode === 'MISSING_CALCULATION_CONTEXT'
+  );
+});
+
+check('calculateAnnualEmissions: 未知／不相容 activity unit 應拒絕', () => {
+  const activities = [{ ...normalFixture.activities[0], unit: 'kg' }];
+  assert.throws(
+    () => calculateNormalAnnual({ activities }),
+    (error) => error instanceof CarbonCoreError && error.reasonCode === 'UNKNOWN_UNIT'
+  );
+});
+
+check('calculateAnnualEmissions: 定點輸入溢位應回 CALCULATION_OVERFLOW', () => {
+  const activities = [{ ...normalFixture.activities[0], quantity: Number.MAX_SAFE_INTEGER }];
+  assert.throws(
+    () => calculateNormalAnnual({ activities }),
+    (error) => error instanceof CarbonCoreError && error.reasonCode === 'CALCULATION_OVERFLOW'
+  );
 });
 
 check('missing_period fixture: NEEDS_EVIDENCE / EVIDENCE_PERIOD_INCOMPLETE，不指控造假', () => {
@@ -189,23 +363,63 @@ check('reconcileAllocationLedger: 重複 shipmentId 應 BLOCKED / DUPLICATE_SHIP
 check('buildCalculationReceipt: 正常情況回傳 inputHash 與正確總排放', () => {
   const receipt = buildCalculationReceipt({
     installationYear: normalFixture.installationYear,
+    activities: normalFixture.activities,
     factorSet: normalFixture.factorSet,
     policyProfile: normalFixture.policyProfile,
   });
   assert.strictEqual(receipt.result.totalEmissions, 360);
   assert.ok(typeof receipt.inputHash === 'string' && receipt.inputHash.length === 64, 'inputHash 應為 64 字元 sha256 hex');
+  assert.deepStrictEqual(receipt.metadata, {
+    factor: { factorSetId: 'CBAM-DEMO-2026-v1', version: '1', sourceHash: 'sha256:demo-factorset-v1' },
+    policy: { policyProfileId: 'CBAM-STEEL-2026-v1', version: '1' },
+    scale: 1_000_000,
+    roundingRule: 'ROUND_HALF_UP_TO_NEAREST_SCALED_INTEGER',
+    methodVersion: 'sum-activity-factor-v1',
+  });
+});
+
+check('buildCalculationReceipt: 相同輸入 hash 可重現，factor/policy metadata 改變會改 hash', () => {
+  const input = {
+    installationYear: normalFixture.installationYear,
+    activities: normalFixture.activities,
+    factorSet: normalFixture.factorSet,
+    policyProfile: normalFixture.policyProfile,
+  };
+  const first = buildCalculationReceipt(input);
+  const second = buildCalculationReceipt(input);
+  assert.strictEqual(first.inputHash, second.inputHash);
+  assert.strictEqual(first.result.totalEmissionsScaled, second.result.totalEmissionsScaled);
+  const changedFactor = buildCalculationReceipt({
+    ...input,
+    factorSet: { ...normalFixture.factorSet, version: '2', sourceHash: 'sha256:demo-factorset-v2' },
+  });
+  const changedPolicy = buildCalculationReceipt({
+    ...input,
+    policyProfile: { ...normalFixture.policyProfile, version: '2' },
+  });
+  const changedFactorValue = buildCalculationReceipt({
+    ...input,
+    factorSet: {
+      ...normalFixture.factorSet,
+      factors: normalFixture.factorSet.factors.map((factor, index) => index === 0 ? { ...factor, value: 3 } : factor),
+    },
+  });
+  assert.notStrictEqual(first.inputHash, changedFactor.inputHash);
+  assert.notStrictEqual(first.inputHash, changedPolicy.inputHash);
+  assert.notStrictEqual(first.inputHash, changedFactorValue.inputHash);
+  assert.notStrictEqual(first.result.totalEmissions, changedFactorValue.result.totalEmissions);
 });
 
 check('buildCalculationReceipt: 缺 factorSet 應拋出 CarbonCoreError', () => {
   assert.throws(
-    () => buildCalculationReceipt({ installationYear: normalFixture.installationYear, policyProfile: normalFixture.policyProfile }),
+    () => buildCalculationReceipt({ installationYear: normalFixture.installationYear, activities: normalFixture.activities, policyProfile: normalFixture.policyProfile }),
     CarbonCoreError
   );
 });
 
 check('buildCalculationReceipt: 缺 policyProfile 應拋出 CarbonCoreError', () => {
   assert.throws(
-    () => buildCalculationReceipt({ installationYear: normalFixture.installationYear, factorSet: normalFixture.factorSet }),
+    () => buildCalculationReceipt({ installationYear: normalFixture.installationYear, activities: normalFixture.activities, factorSet: normalFixture.factorSet }),
     CarbonCoreError
   );
 });

@@ -1,25 +1,29 @@
 # carbon-core 測試案例對照表
 
-對照《可信碳排證據Agent_VibeCodingAI完整工程規格與指令手冊》p.16「測試與 Definition of Done」Contract／Carbon 兩層，以及 p.19 COPY PROMPT 1 的完成定義。跑 `npm run smoke:carbon-core` 逐項驗證（目前 21 項全過）。
+對照《可信碳排證據Agent_VibeCodingAI完整工程規格與指令手冊》p.16「測試與 Definition of Done」Contract／Carbon 兩層，以及 p.19 COPY PROMPT 1 的完成定義。跑 `npm run smoke:carbon-core` 逐項驗證。
 
 ## Contract 層
 
 | 驗收項目 | 對應測試 | 通過標準 | 狀態 |
 |---|---|---|---|
-| normal 通過 | 全部 4 個 fixture 端到端測試 | ✅ |
-| 缺欄、錯型別 | `validateInstallationYear` 拋 `CarbonCoreError` | ✅ |
-| 負數 | 負數強度／負數出貨量測試 | ✅ |
-| 未知 enum | `verificationStatus` 只接受 `draft`/`confirmed`（enums.js 限制） | ✅（隱含於型別檢查） |
+| normal 通過 | `validator.js` 實際載入 `schema-v1.json`，11 個 canonical entities（含 `CalculationReceipt`）全通過 | ✅ |
+| 缺欄、錯型別 | 11 個 canonical entities 逐一移除 required／注入錯 type | ✅ |
+| 負數 | schema 的 InstallationYear／Shipment 數值下界，以及核心負數輸入 | ✅ |
+| 未知 enum | schema 內有 enum 的 8 個 canonical entities 逐一注入未知值 | ✅ |
 
 ## Carbon 層
 
 | 驗收項目 | 對應測試 | 通過標準 | 狀態 |
 |---|---|---|---|
 | 固定答案 | normal fixture SHIP-A/SHIP-B | 100×1.80=180、60×1.80=108 | ✅ |
+| 年度活動計算 | normal fixture activities/factors | `100×2 + 80×2 = 360`，保存 factor refs | ✅ |
+| 係數與缺項 | 不允許 factor set／不存在 factor ref | `FACTOR_NOT_ALLOWED`／`MISSING_CALCULATION_CONTEXT` | ✅ |
 | 零產量 | `validateInstallationYear` 零產量測試 | 拋出 `ZERO_OR_NEGATIVE_QUANTITY` | ✅ |
-| 單位 | 未知單位測試（installationYear + shipment 兩處） | 拋出/回傳 `UNKNOWN_UNIT` | ✅ |
+| 單位 | 未知單位測試（activity + installationYear + shipment） | 拋出/回傳 `UNKNOWN_UNIT` | ✅ |
 | scale | `fixedPoint` 定點數測試 | `SCALE=10^6`，`mulScaled` 正確 | ✅ |
 | 捨入 | `toScaled`/`fromScaled` 往返測試 | 不失真 | ✅ |
+| 溢位 | activity 定點轉換與乘法中間值 | `CALCULATION_OVERFLOW` | ✅ |
+| Receipt 可重現 | 相同輸入重算，並改 factor/policy version | 同輸入 hash/result 相同；metadata 改變則 hash 改變 | ✅ |
 | 超額分配 | `tampered_quantity` fixture + `reconcileAllocationLedger` 重複 shipmentId 測試 | `ALLOCATION_EXCEEDS_PRODUCTION`／`DUPLICATE_SHIPMENT_ID` | ✅ |
 
 ## 必備異常 Fixture 對照表（規格 p.8，Phase 1 範圍內的 4 個）

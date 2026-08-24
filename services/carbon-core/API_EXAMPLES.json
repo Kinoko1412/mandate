@@ -10,13 +10,17 @@
   },
   "calculateAnnualEmissions": {
     "normal": {
-      "input_note": "見 fixtures/normal.json 的 installationYear",
-      "output": { "totalEmissionsScaled": 360000000, "totalEmissions": 360, "unit": "tCO2e", "basis": { "productionTonnes": 200, "verifiedIntensity": 1.80 } }
-    }
+      "input_note": "見 fixtures/normal.json 的 activities + factorSet + policyProfile；Demo 係數均標 demoOnly，不是官方係數",
+      "output": { "totalEmissionsScaled": 360000000, "totalEmissions": 360, "unit": "tCO2e", "basis_note": "兩項 terms：100 MWh×2=200、80 GJ×2=160，保存 factorRef 與 scaled 值" }
+    },
+    "error_factor_not_allowed": { "input_note": "factorSetId 不在 policyProfile.allowedFactorSets", "throws": { "name": "CarbonCoreError", "reasonCode": "FACTOR_NOT_ALLOWED" } },
+    "error_missing_factor_ref": { "throws": { "name": "CarbonCoreError", "reasonCode": "MISSING_CALCULATION_CONTEXT" } },
+    "error_unknown_unit": { "throws": { "name": "CarbonCoreError", "reasonCode": "UNKNOWN_UNIT" } },
+    "error_overflow": { "throws": { "name": "CarbonCoreError", "reasonCode": "CALCULATION_OVERFLOW" } }
   },
   "calculateIntensity": {
     "normal": {
-      "input_note": "見 fixtures/normal.json 的 installationYear",
+      "input": { "annualEmissions_note": "calculateAnnualEmissions 的結果（360 tCO2e）", "productionTonnes": 200 },
       "output": { "intensityScaled": 1800000, "intensity": 1.80, "unit": "tCO2e/tonne" }
     }
   },
@@ -45,8 +49,23 @@
   },
   "buildCalculationReceipt": {
     "normal": {
-      "input_note": "installationYear + factorSet + policyProfile 見 fixtures/normal.json",
-      "output": { "inputHash": "<64 字元 sha256 hex>", "installationId": "TW-STEEL-01", "reportingYear": 2026, "policyProfileId": "CBAM-STEEL-2026-v1", "factorSetId": "CBAM-DEMO-2026-v1", "result": { "totalEmissionsScaled": 360000000, "totalEmissions": 360 }, "computedAt": "<ISO timestamp>" }
+      "input_note": "installationYear + activities + factorSet + policyProfile 見 fixtures/normal.json",
+      "output": {
+        "inputHash": "<64 字元 sha256 hex>",
+        "installationId": "TW-STEEL-01",
+        "reportingYear": 2026,
+        "policyProfileId": "CBAM-STEEL-2026-v1",
+        "factorSetId": "CBAM-DEMO-2026-v1",
+        "metadata": {
+          "factor": { "factorSetId": "CBAM-DEMO-2026-v1", "version": "1", "sourceHash": "sha256:demo-factorset-v1" },
+          "policy": { "policyProfileId": "CBAM-STEEL-2026-v1", "version": "1" },
+          "scale": 1000000,
+          "roundingRule": "ROUND_HALF_UP_TO_NEAREST_SCALED_INTEGER",
+          "methodVersion": "sum-activity-factor-v1"
+        },
+        "result": { "totalEmissionsScaled": 360000000, "totalEmissions": 360 },
+        "computedAt": "<ISO timestamp>"
+      }
     },
     "error_missing_factor_set": { "throws": { "name": "CarbonCoreError", "reasonCode": "MISSING_CALCULATION_CONTEXT" } },
     "error_missing_policy_profile": { "throws": { "name": "CarbonCoreError", "reasonCode": "MISSING_CALCULATION_CONTEXT" } }

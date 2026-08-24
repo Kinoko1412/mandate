@@ -29,7 +29,7 @@
         "PUBLIC_INPUT_MISMATCH", "PROOF_CONTEXT_MISMATCH", "AGENT_REVIEW_REQUIRED", "GATE_OK",
         "ALLOCATION_EXCEEDS_PRODUCTION", "DUPLICATE_SHIPMENT_ID", "UNKNOWN_UNIT",
         "ZERO_OR_NEGATIVE_QUANTITY", "INVALID_REPORTING_YEAR", "CALCULATION_OVERFLOW",
-        "MISSING_CALCULATION_CONTEXT"
+        "MISSING_CALCULATION_CONTEXT", "INTENSITY_MISMATCH"
       ]
     },
 
@@ -252,7 +252,7 @@
     "CalculationReceipt": {
       "type": "object",
       "description": "NOT IN SPEC 的具體形狀——文件 p.5/p.10 只講『輸入 Hash、方法／factor 版本、結果、時間』，沒給正式 schema，這是 carbon-core 依描述設計的形狀",
-      "required": ["inputHash", "installationId", "reportingYear", "policyProfileId", "factorSetId", "result", "computedAt"],
+      "required": ["inputHash", "installationId", "reportingYear", "policyProfileId", "factorSetId", "metadata", "result", "computedAt"],
       "additionalProperties": true,
       "properties": {
         "inputHash": { "type": "string" },
@@ -260,6 +260,32 @@
         "reportingYear": { "type": "integer" },
         "policyProfileId": { "type": "string" },
         "factorSetId": { "type": "string" },
+        "metadata": {
+          "type": "object",
+          "required": ["factor", "policy", "scale", "roundingRule", "methodVersion"],
+          "properties": {
+            "factor": {
+              "type": "object",
+              "required": ["factorSetId", "version", "sourceHash"],
+              "properties": {
+                "factorSetId": { "type": "string" },
+                "version": { "type": "string" },
+                "sourceHash": { "type": "string" }
+              }
+            },
+            "policy": {
+              "type": "object",
+              "required": ["policyProfileId", "version"],
+              "properties": {
+                "policyProfileId": { "type": "string" },
+                "version": { "type": "string" }
+              }
+            },
+            "scale": { "type": "integer" },
+            "roundingRule": { "type": "string" },
+            "methodVersion": { "type": "string" }
+          }
+        },
         "result": {
           "type": "object",
           "properties": {
