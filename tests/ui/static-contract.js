@@ -1,0 +1,225 @@
+'use strict';
+
+const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
+const { spawnSync } = require('child_process');
+
+const ROOT = path.join(__dirname, '..', '..');
+const PUBLIC = path.join(ROOT, 'public');
+const indexPath = path.join(PUBLIC, 'index.html');
+const legacyPath = path.join(PUBLIC, 'legacy.html');
+const scriptPath = path.join(PUBLIC, 'js', 'case-workflow.js');
+const stylePath = path.join(PUBLIC, 'css', 'case-workflow.css');
+const serverPath = path.join(ROOT, 'server', 'index.js');
+const backupRoot = path.join(ROOT, '_backups', '20260825', 'public');
+
+let failed = 0;
+
+function check(label, fn) {
+  try {
+    fn();
+    console.log(`PASS  ${label}`);
+  } catch (error) {
+    failed += 1;
+    console.log(`FAIL  ${label}`);
+    console.log(`      ${error.message}`);
+  }
+}
+
+function read(filePath) {
+  return fs.readFileSync(filePath, 'utf8');
+}
+
+function listFilesRecursively(directory) {
+  return fs.readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const entryPath = path.join(directory, entry.name);
+    return entry.isDirectory() ? listFilesRecursively(entryPath) : [entryPath];
+  });
+}
+
+function section(html, id) {
+  const start = html.indexOf(`id="${id}"`);
+  assert.ok(start >= 0, `missing section #${id}`);
+  const nextRoleView = html.indexOf('class="role-view"', start + 1);
+  return html.slice(start, nextRoleView < 0 ? html.length : nextRoleView);
+}
+
+const index = read(indexPath);
+const legacy = read(legacyPath);
+const script = read(scriptPath);
+const style = read(stylePath);
+const serverSource = read(serverPath);
+
+check('root: 三角色與固定案件 hooks 存在', () => {
+  for (const value of [
+    'data-role="Supplier"',
+    'data-role="Importer"',
+    'data-role="Verifier"',
+    'CASE-2026-001',
+    'id="supplier-view"',
+    'id="importer-view"',
+    'id="verifier-view"',
+    'id="audit-timeline"',
+    'id="seed-evidence"',
+    'id="confirm-all"',
+    'id="submit-case"',
+    'id="create-grant"',
+    'id="open-evidence"',
+    'id="download-evidence"',
+    'id="finding-form"',
+  ]) {
+    assert.ok(index.includes(value), `missing ${value}`);
+  }
+  assert.match(
+    index,
+    /class="field">\s*<label for="grant-evidence">[\s\S]*?<select id="grant-evidence">/
+  );
+  assert.match(
+    index,
+    /class="field">\s*<label for="grant-seconds">[\s\S]*?<input id="grant-seconds"/
+  );
+});
+
+check('root: 信任邊界與 unavailable 文案存在', () => {
+  assert.ok(index.includes('Demo role，不是真實認證'));
+  assert.ok(index.includes('READY_FOR_VERIFIER 只代表具備送交查驗準備條件，不代表正式查驗完成或官方核准'));
+  assert.ok(index.includes('尚未驗證'));
+  assert.ok(index.includes('id="ready-disclaimer"'));
+  assert.ok(!/CBAM Certified|Officially Approved|海關已核准/i.test(index));
+});
+
+check('root: favicon 使用內嵌資源，不會再請求缺少的 /favicon.ico', () => {
+  assert.ok(index.includes('rel="icon"'));
+  assert.ok(index.includes('href="data:image/svg+xml,'));
+  assert.ok(!index.includes('href="favicon.ico"'));
+});
+
+check('root: 不使用 CDN 或外部字型', () => {
+  assert.ok(!/https?:\/\//i.test(index));
+  assert.ok(!/fonts\.googleapis|cdnjs|unpkg|jsdelivr/i.test(index));
+});
+
+check('Importer: 靜態區塊沒有敏感欄位 hooks', () => {
+  const importer = section(index, 'importer-view');
+  for (const forbidden of [
+    'vaultRef',
+    'contentBase64',
+    'grant-token',
+    'evidence-filename',
+    'opened-content',
+  ]) {
+    assert.ok(!importer.includes(forbidden), `Importer section contains ${forbidden}`);
+  }
+});
+
+check('client: 所有 API 帶角色 header 且 token 不進 URL', () => {
+  assert.ok(script.includes("'x-demo-role'"));
+  assert.ok(script.includes("'x-vault-token'"));
+  assert.ok(script.includes('sessionStorage'));
+  assert.ok(!script.includes('console.log'));
+  assert.ok(!/vaultToken\s*=|[?&](?:token|vaultToken)=/.test(script));
+  assert.ok(script.includes("'x-vault-token': token"));
+  assert.ok(script.includes("mode === 'download' ? '/download' : ''"));
+});
+
+check('client: Importer 直接呈現 server allocationStatus，不自行覆寫', () => {
+  assert.ok(script.includes('shipment.allocationStatus'));
+  assert.ok(!script.includes('trustServicesVerified ? shipment.allocationStatus'));
+});
+
+check('client: submit 無論成功失敗都重新載入 server role/state', () => {
+  const submitSection = script.slice(
+    script.indexOf('async function submitCase()'),
+    script.indexOf('async function createGrant()')
+  );
+  assert.ok(submitSection.includes('finally'));
+  assert.ok(submitSection.includes('await loadRole()'));
+});
+
+check('client: reset 依角色隱藏並保留權限說明', () => {
+  assert.ok(index.includes('aria-describedby="reset-help"'));
+  assert.ok(script.includes("$('reset-workflow').hidden = !supplier"));
+  assert.ok(script.includes('無重置權限；請切換 Supplier'));
+});
+
+check('client: open/download 成功與 Grant 終態都清除 session token', () => {
+  assert.ok(script.includes("['GRANT_INVALID', 'GRANT_EXPIRED', 'GRANT_REVOKED']"));
+  assert.ok(script.includes('function clearVaultSession()'));
+  assert.ok(script.includes("sessionStorage.removeItem(TOKEN_KEY)"));
+  assert.ok(script.includes("sessionStorage.removeItem(GRANT_KEY)"));
+  assert.ok(script.includes('URL.createObjectURL(blob)'));
+});
+
+check('styles: DRAFT/VERIFIER_REVIEW/ARCHIVED、loading、focus 與窄版 hooks 存在', () => {
+  for (const value of [
+    '[data-status="DRAFT"]',
+    '[data-status="VERIFIER_REVIEW"]',
+    '[data-status="ARCHIVED"]',
+    'html[data-loading="true"]',
+    'input:focus-visible',
+    '@media (max-width: 640px)',
+  ]) {
+    assert.ok(style.includes(value), `missing style ${value}`);
+  }
+});
+
+check('client: Shipment quantityUnit 缺漏時顯示 tonne 而非 undefined', () => {
+  assert.ok(script.includes("shipment.quantityUnit || 'tonne'"));
+});
+
+check('legacy: 舊 UI 與所有相對資源仍可載入', () => {
+  assert.ok(legacy.includes('js/app.js'));
+  assert.ok(legacy.includes('css/app.css'));
+  const refs = [...legacy.matchAll(/(?:src|href)="([^"]+)"/g)]
+    .map((match) => match[1])
+    .filter((ref) => !/^(?:https?:|#)/.test(ref));
+  refs.forEach((ref) => {
+    assert.ok(fs.existsSync(path.join(PUBLIC, ref)), `legacy resource missing: ${ref}`);
+  });
+});
+
+check('assets: 新版 CSS 與 JS 檔案存在', () => {
+  assert.ok(fs.existsSync(stylePath));
+  assert.ok(index.includes('css/case-workflow.css'));
+  assert.ok(index.includes('js/case-workflow.js'));
+});
+
+check('static server: 遞迴阻擋 public 備份且保留於 _backups', () => {
+  const leakedBackups = listFilesRecursively(PUBLIC)
+    .filter((filePath) => path.basename(filePath).includes('.bak-'));
+  assert.deepStrictEqual(
+    leakedBackups,
+    [],
+    `public backups leaked: ${leakedBackups.map((filePath) => path.relative(PUBLIC, filePath)).join(', ')}`
+  );
+  for (const relativePath of [
+    'index.html.bak-20260825',
+    path.join('js', 'app.js.bak-20260825'),
+    path.join('js', 'case-workflow.js.bak-20260825'),
+    path.join('css', 'app.css.bak-20260825'),
+    path.join('css', 'case-workflow.css.bak-20260825'),
+  ]) {
+    assert.ok(
+      fs.existsSync(path.join(backupRoot, relativePath)),
+      `preserved backup missing: ${relativePath}`
+    );
+  }
+  assert.ok(serverSource.includes("path.basename(rel).includes('.bak-')"));
+  assert.ok(serverSource.includes("sendJson(res, 404, { error: 'Not found' })"));
+});
+
+check('client: JavaScript 語法通過 node --check', () => {
+  const result = spawnSync(process.execPath, ['--check', scriptPath], {
+    cwd: ROOT,
+    encoding: 'utf8',
+  });
+  assert.strictEqual(result.status, 0, result.stderr || result.stdout);
+});
+
+console.log('');
+if (failed > 0) {
+  console.log(`RESULT: ${failed} failed`);
+  process.exit(1);
+}
+console.log('RESULT: all PASS');

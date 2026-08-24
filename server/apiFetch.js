@@ -16,6 +16,7 @@ const { checkPcfPayload, buildSupplementLetter } = require('./pcfCheck');
 const { plainReason } = require('./plainReason');
 const supabaseSync = require('./supabaseSync');
 const pactMapping = require('./pactMapping');
+const { handleWorkflowApi } = require('./workflowApi');
 
 function buildActor(body) {
   const st = store.getState();
@@ -152,8 +153,15 @@ function runPolicySimulate(body) {
   };
 }
 
-async function handleApiPath(method, pathname, body) {
+async function handleApiPath(method, pathname, body, requestContext) {
   const reqBody = body || {};
+  const workflowResult = await handleWorkflowApi(
+    method,
+    pathname,
+    reqBody,
+    requestContext || {}
+  );
+  if (workflowResult) return workflowResult;
 
   if (method === 'GET' && pathname === '/api/session') {
     return { status: 200, body: store.getSession() };
@@ -587,6 +595,12 @@ async function handleFetchRequest(request) {
   const url = new URL(request.url);
   const pathname = url.pathname;
   const method = request.method || 'GET';
+  const requestContext = {
+    // Explicit demo-only role switch mapped to a fixed server-side whitelist.
+    demoRole: request.headers.get('x-demo-role') || url.searchParams.get('demoRole'),
+    // Keep Vault credentials out of URLs and query logs.
+    vaultToken: request.headers.get('x-vault-token'),
+  };
 
   if (!pathname.startsWith('/api/')) {
     return null;
@@ -599,17 +613,26 @@ async function handleFetchRequest(request) {
       try {
         body = JSON.parse(raw);
       } catch {
-        return jsonResponse(400, { error: 'Invalid JSON body' });
+        return jsonResponse(400, {
+          code: 'INVALID_JSON',
+          message: 'JSON request body 格式無效。',
+          retryable: false,
+          details: null,
+        });
       }
     }
   }
 
   try {
-    const result = await handleApiPath(method, pathname, body);
+    const result = await handleApiPath(method, pathname, body, requestContext);
     return jsonResponse(result.status, result.body);
   } catch (err) {
-    console.error(err);
-    return jsonResponse(500, { error: 'Internal error', message: String(err.message || err) });
+    return jsonResponse(500, {
+      code: 'INTERNAL_ERROR',
+      message: '伺服器暫時無法處理此請求。',
+      retryable: false,
+      details: null,
+    });
   }
 }
 

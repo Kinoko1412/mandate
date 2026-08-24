@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Mandate — 碳數據信任閘門</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/tokens.css" />
+  <link rel="stylesheet" href="css/app.css" />
+  <link rel="stylesheet" href="css/dashboard.css" />
+  <link rel="stylesheet" href="css/onboarding.css" />
+  <link rel="stylesheet" href="css/tour.css" />
+  <link rel="stylesheet" href="css/result-sheet.css" />
+  <link rel="stylesheet" href="css/policy-console.css" />
+  <link rel="stylesheet" href="css/policy-guide.css" />
+</head>
+<body>
+  <div id="error-banner" role="alert"></div>
+
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">Mandate</div>
+      <nav class="mode-tabs" aria-label="畫面切換">
+        <button type="button" class="mode-tab active" id="tab-dashboard">主控版</button>
+        <button type="button" class="mode-tab" id="tab-detail">詳細控制</button>
+        <button type="button" class="mode-tab" id="tab-policy">政策引擎</button>
+        <button type="button" class="mode-tab mode-tab-ghost" id="tab-supplier">供應商自查</button>
+      </nav>
+      <div class="topbar-meta" id="topbar-meta">
+        代表 <strong>艾克美工業・貿易合規</strong> · 合規授權
+      </div>
+      <div class="help-wrap">
+        <button type="button" class="btn-onboard-help" id="btn-onboard-help" title="說明與導覽" aria-label="說明與導覽">？</button>
+        <div class="help-menu" id="help-menu" hidden>
+          <button type="button" id="help-menu-full-tour">完整介面導覽</button>
+          <button type="button" id="help-menu-tour">三幕 Demo 解說</button>
+          <button type="button" id="help-menu-wizard">用途說明</button>
+          <button type="button" id="help-menu-policy">政策引擎教學</button>
+        </div>
+      </div>
+      <div class="status-badge" id="mandate-status" data-status="ACTIVE" title="授權狀態">
+        <span class="bar" aria-hidden="true"></span>
+        <span class="label">授權有效</span>
+      </div>
+    </header>
+
+    <div class="tip-bar" id="tip-bar">
+      <span>只管數字夠不夠格寫進 CBAM／客戶回覆，不是算碳儀表板。</span>
+      <button type="button" class="tip-dismiss" id="tip-dismiss" aria-label="關閉提示">×</button>
+    </div>
+
+    <!-- 主控版 -->
+    <main class="dashboard" id="view-dashboard">
+      <div class="dash-inbox-banner" id="dash-inbox-banner" hidden aria-live="polite">
+        <span id="dash-inbox-text">最新收到</span>
+        <button type="button" class="link-btn" id="dash-inbox-open">查看</button>
+      </div>
+
+      <div class="dash-banner" id="dash-pending-banner" hidden aria-live="polite">
+        <div class="dash-banner-text" id="dash-pending-text"></div>
+        <div class="btn-row">
+          <button type="button" class="btn btn-primary btn-sm" id="dash-btn-approve">確認寫入草稿</button>
+          <button type="button" class="btn btn-danger btn-sm" id="dash-btn-deny">不同意</button>
+        </div>
+      </div>
+
+      <section class="dash-zone dash-pipeline">
+        <div class="dash-zone-head">
+          <h2 class="dash-heading">供應商進度</h2>
+          <span class="dash-meta" id="dash-meta">載入中…</span>
+        </div>
+        <div class="pipeline-grid" id="pipeline-grid">
+          <p class="feed-empty">載入中…</p>
+        </div>
+      </section>
+
+      <div class="dash-layout">
+        <div class="dash-main">
+          <section class="dash-zone dash-actions-row">
+            <div class="dash-hero-actions">
+              <button type="button" class="btn btn-primary" id="btn-demo">AI 自動演三幕</button>
+              <button type="button" class="btn btn-ghost" id="dash-btn-reset-hero">重置 Demo</button>
+              <button type="button" class="btn btn-ghost" id="dash-open-supplier">供應商自查</button>
+            </div>
+            <div class="dash-agent-bar">
+              <label class="sr-only" for="dash-chat-input">跟 AI 說</label>
+              <textarea id="dash-chat-input" rows="1" placeholder="跟 AI 說：向無證零件行索取碳數據並做品質檢查"></textarea>
+              <button type="button" class="btn btn-primary" id="dash-chat-send">送出</button>
+            </div>
+          </section>
+
+          <section class="dash-zone dash-next" id="dash-next" aria-live="polite">
+            <h2 class="dash-heading">下一步</h2>
+            <div class="dash-next-body" id="dash-next-body">
+              <p class="feed-empty">載入中…</p>
+            </div>
+          </section>
+
+          <p class="dash-foot">
+            需要看 <code>policyId</code> 或手動逐步操作？
+            <button type="button" class="link-btn" id="goto-detail">開啟詳細控制</button>
+          </p>
+        </div>
+
+        <aside class="dash-side">
+          <h2 class="dash-heading">最近動作</h2>
+          <div class="recent-feed" id="recent-feed">
+            <p class="feed-empty">尚無紀錄</p>
+          </div>
+        </aside>
+      </div>
+    </main>
+
+    <!-- 詳細控制 -->
+    <main class="workbench" id="view-detail" hidden>
+      <aside class="panel" id="panel-auth">
+        <div class="panel-head">
+          <h2>詳細控制</h2>
+          <span class="hint">手動備援 · 評審對文件</span>
+        </div>
+        <div class="panel-body">
+          <details class="fold-section">
+            <summary>授權與品質門檻</summary>
+            <section class="section">
+              <div class="section-label">可以做</div>
+              <ul class="tool-list allow" id="allowed-tools">
+                <li class="empty">載入中…</li>
+              </ul>
+            </section>
+            <section class="section">
+              <div class="section-label">絕對不行</div>
+              <ul class="tool-list deny" id="denied-tools">
+                <li class="empty">載入中…</li>
+              </ul>
+            </section>
+            <div class="constraint-grid">
+              <div class="constraint-cell">
+                <span class="k">Level 1</span>
+                <span class="v">排放量・單位・方法・邊界・期間</span>
+              </div>
+              <div class="constraint-cell">
+                <span class="k">Level 2</span>
+                <span class="v">CN 碼・單位排放・查驗狀態</span>
+              </div>
+            </div>
+          </details>
+
+          <section class="section">
+            <div class="section-label">手動逐步（須依序 ①→②→③）</div>
+            <div class="field">
+              <label for="supplier-select">供應商</label>
+              <select id="supplier-select">
+                <option value="">— 載入中 —</option>
+              </select>
+            </div>
+            <div class="btn-row">
+              <button type="button" class="btn" id="btn-request">① 索取</button>
+              <button type="button" class="btn" id="btn-fetch">② 取回回覆</button>
+              <button type="button" class="btn" id="btn-ingest">③ 品質檢查</button>
+              <button type="button" class="btn" id="btn-submit">④ 申請寫入</button>
+            </div>
+            <div class="btn-row">
+              <button type="button" class="btn btn-danger" id="btn-revoke-share">撤銷分享</button>
+              <button type="button" class="btn btn-ghost" id="btn-revoke">收回授權</button>
+              <button type="button" class="btn btn-ghost" id="btn-reset">重置</button>
+            </div>
+            <div class="btn-row">
+              <button type="button" class="btn btn-sm btn-ghost" id="btn-pact-preview" title="把上方選取供應商的 PCF 轉成 PACT V3 ProductFootprint 格式預覽（新分頁開啟）">
+                查看 PACT V3 格式預覽
+              </button>
+            </div>
+            <div class="action-inbox" id="action-inbox">
+              <div class="action-inbox-head">
+                <div class="section-label">收件箱</div>
+                <span class="action-inbox-count" id="action-inbox-count"></span>
+              </div>
+              <p class="action-inbox-empty" id="action-inbox-empty">尚無收到項目。取回供應商回覆後會出現在這裡。</p>
+              <div class="action-inbox-list" id="action-inbox-list"></div>
+            </div>
+          </section>
+        </div>
+      </aside>
+
+      <section class="panel" id="panel-flow">
+        <div class="panel-head">
+          <h2>Agent 對話</h2>
+          <span class="hint">完整紀錄</span>
+        </div>
+        <div class="panel-body">
+          <div class="pending-panel" id="pending-panel" aria-live="polite">
+            <h3>待合規主管確認</h3>
+            <div class="pending-body" id="pending-body"></div>
+            <div class="btn-row">
+              <button type="button" class="btn btn-primary btn-sm" id="btn-approve">確認寫入草稿</button>
+              <button type="button" class="btn btn-danger btn-sm" id="btn-deny">不同意</button>
+              <button type="button" class="btn btn-sm" id="btn-export-draft" hidden>複製給客戶回覆</button>
+            </div>
+          </div>
+          <div class="agent-chat" id="agent-chat">
+            <p class="agent-status" id="agent-status">檢查語言模型中…</p>
+            <div class="chat-log" id="chat-log"></div>
+            <div class="chat-compose">
+              <textarea id="chat-input" rows="2" placeholder="跟 AI 說話…"></textarea>
+              <button type="button" class="btn btn-primary btn-sm" id="btn-chat-send">送出</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <aside class="panel" id="panel-audit">
+        <div class="panel-head">
+          <h2>稽核紀錄</h2>
+          <span class="hint">含 policyId</span>
+        </div>
+        <div class="panel-body">
+          <div class="btn-row">
+            <button type="button" class="btn btn-sm btn-ghost" id="btn-export-audit">匯出</button>
+          </div>
+          <div class="cloud-audit" id="cloud-audit">
+            <div class="cloud-audit-row">
+              <span class="cloud-audit-badge" id="cloud-audit-badge" data-state="loading">☁ 檢查雲端持久化中…</span>
+              <button type="button" class="btn btn-sm btn-ghost" id="btn-cloud-audit-refresh">重新驗證</button>
+            </div>
+            <ul class="cloud-audit-list" id="cloud-audit-list" hidden></ul>
+          </div>
+          <ul class="audit-list" id="audit-list">
+            <li class="feed-empty">尚無紀錄</li>
+          </ul>
+        </div>
+      </aside>
+    </main>
+
+    <!-- 政策引擎（評審透明後台） -->
+    <main class="policy-console" id="view-policy" hidden>
+      <header class="policy-console-head">
+        <div class="policy-console-head-row">
+          <div>
+            <h1>政策引擎 · 透明判斷</h1>
+            <p>確定性規則引擎：六步短路評估。模擬<strong>不寫入 audit</strong>；真實操作請看詳細控制稽核。</p>
+            <div class="policy-quickstart" id="policy-quickstart">
+              <strong>第一次來？</strong>
+              建議先看 30 秒教學，或一鍵演示「幕一拒收」。
+              <div class="btn-row">
+                <button type="button" class="btn btn-sm btn-primary" id="policy-quickstart-guide">開始教學</button>
+                <button type="button" class="btn btn-sm btn-ghost" id="policy-quickstart-demo">直接演示幕一</button>
+              </div>
+            </div>
+          </div>
+          <div class="policy-console-head-actions">
+            <button type="button" class="btn btn-sm btn-ghost" id="btn-policy-guide">？ 教學</button>
+          </div>
+        </div>
+      </header>
+      <div class="policy-console-grid">
+        <section class="policy-col" id="panel-policy-catalog">
+          <div class="policy-col-head">政策目錄（POL-*）</div>
+          <div class="policy-col-body">
+            <select class="policy-filter" id="policy-step-filter" aria-label="依評估步驟篩選">
+              <option value="0">全部步驟</option>
+              <option value="1">① 授權狀態</option>
+              <option value="2">② 拒絕清單</option>
+              <option value="3">③ 工具準入</option>
+              <option value="4">④ 資料約束</option>
+              <option value="5">⑤ 人類確認</option>
+              <option value="6">⑥ 全部通過</option>
+            </select>
+            <ul class="policy-catalog" id="policy-catalog">
+              <li class="feed-empty">載入中…</li>
+            </ul>
+            <div class="policy-presets" id="policy-presets"></div>
+          </div>
+        </section>
+        <section class="policy-col" id="panel-policy-pipeline">
+          <div class="policy-col-head">六步管線 + 模擬結果</div>
+          <div class="policy-col-body">
+            <div class="policy-result empty" id="policy-result">
+              選擇情境或填寫模擬器，按「執行模擬」。<strong>不會寫入 audit</strong>。
+            </div>
+            <ul class="policy-pipeline" id="policy-pipeline">
+              <li class="feed-empty">執行模擬後顯示六步管線</li>
+            </ul>
+          </div>
+        </section>
+        <section class="policy-col" id="panel-policy-context">
+          <div class="policy-col-head">即時上下文</div>
+          <div class="policy-col-body policy-context">
+            <dl id="policy-context">
+              <dt>載入中</dt>
+              <dd>—</dd>
+            </dl>
+          </div>
+        </section>
+      </div>
+      <section class="policy-simulator" id="panel-policy-simulator">
+        <div class="policy-simulator-row">
+          <label>
+            工具
+            <select id="policy-sim-tool"></select>
+          </label>
+          <label>
+            角色
+            <select id="policy-sim-actor">
+              <option value="AGENT">Agent（AI 助理）</option>
+            </select>
+          </label>
+          <label>
+            供應商
+            <select id="policy-sim-supplier"></select>
+          </label>
+          <button type="button" class="btn btn-primary" id="policy-sim-run">執行模擬</button>
+        </div>
+        <label style="display:block;margin-top:12px;font-size:0.75rem;color:var(--ink-muted)">
+          input（JSON，ingest 可貼 partial payload）
+          <textarea id="policy-sim-input" rows="2" class="supplier-json" style="margin-top:4px;width:100%;font-size:0.8125rem" placeholder='{"supplierId":"supplier_unverified_01","tCO2e":8.1}'></textarea>
+        </label>
+      </section>
+      <p class="policy-foot">
+        真實操作的 audit 軌跡：
+        <button type="button" class="link-btn" id="policy-goto-audit">查看詳細控制稽核</button>
+      </p>
+    </main>
+  </div>
+
+  <div class="tour-overlay" id="tour-overlay" hidden aria-live="polite"></div>
+
+  <div class="onboard-overlay" id="onboard-overlay" hidden role="dialog" aria-modal="true" aria-labelledby="onboard-title">
+    <div class="onboard-dialog">
+      <div class="onboard-head">
+        <div class="onboard-head-text">
+          <h2 id="onboard-title">Mandate</h2>
+          <span class="onboard-counter" id="onboard-counter">1 / 12</span>
+        </div>
+        <button type="button" class="onboard-close" id="onboard-close" aria-label="關閉">×</button>
+      </div>
+      <div class="onboard-body" id="onboard-body"></div>
+      <div class="onboard-foot">
+        <div class="onboard-dots" id="onboard-dots" aria-label="步驟進度"></div>
+        <div class="onboard-nav">
+          <button type="button" class="btn btn-ghost btn-sm" id="onboard-skip">跳過</button>
+          <button type="button" class="btn btn-ghost btn-sm" id="onboard-prev" hidden>上一步</button>
+          <button type="button" class="btn btn-primary btn-sm" id="onboard-next">下一頁</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="supplier-modal" hidden role="dialog" aria-modal="true" aria-labelledby="supplier-modal-title">
+    <div class="modal-dialog supplier-modal">
+      <div class="modal-head">
+        <div>
+          <h2 id="supplier-modal-title">供應商自查</h2>
+          <p class="modal-sub">貼 JSON 看缺什麼、能不能交</p>
+        </div>
+        <button type="button" class="modal-close" id="supplier-modal-close" aria-label="關閉">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="btn-row">
+          <button type="button" class="btn btn-sm" id="tpl-bad">範本：只有噸數</button>
+          <button type="button" class="btn btn-sm" id="tpl-good">範本：完整資料</button>
+        </div>
+        <textarea id="supplier-json" rows="10" class="supplier-json" placeholder='{"tCO2e":8.1,"supplierId":"my_factory"}'></textarea>
+        <div class="btn-row modal-actions">
+          <button type="button" class="btn btn-primary" id="btn-check-pcf">檢查能不能交</button>
+          <button type="button" class="btn btn-ghost" id="btn-supplier-cancel">關閉</button>
+        </div>
+        <div class="check-result" id="check-result" hidden></div>
+        </div>
+    </div>
+  </div>
+
+  <div class="result-sheet-overlay" id="result-sheet" hidden role="dialog" aria-modal="true" aria-labelledby="result-sheet-title">
+    <div class="result-sheet-dialog">
+      <div class="result-sheet-head">
+        <div class="result-sheet-head-text">
+          <h2 id="result-sheet-title">動作結果</h2>
+          <p class="result-sheet-sub" id="result-sheet-sub"></p>
+        </div>
+        <button type="button" class="result-sheet-close" id="result-sheet-close" aria-label="關閉">×</button>
+      </div>
+      <div class="result-sheet-body">
+        <span class="result-decision-badge" id="result-sheet-badge"></span>
+        <div id="result-sheet-content"></div>
+      </div>
+      <div class="result-sheet-foot">
+        <button type="button" class="btn btn-primary btn-sm" id="result-sheet-dismiss">關閉</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="tour-hole" id="tour-hole" hidden></div>
+  <div class="tour-tooltip" id="tour-tooltip" hidden>
+    <div class="tour-tooltip-head">
+      <span class="tour-badge" id="tour-badge"></span>
+      <span class="tour-step-label" id="tour-step-label"></span>
+    </div>
+    <h3 class="tour-title" id="tour-title"></h3>
+    <div class="tour-body" id="tour-body"></div>
+    <div class="tour-actions">
+      <button type="button" class="btn btn-ghost btn-sm" id="tour-skip">稍後再說</button>
+      <button type="button" class="btn btn-primary btn-sm" id="tour-primary">下一步</button>
+    </div>
+  </div>
+
+  <div class="policy-guide-overlay" id="policy-guide-overlay" hidden role="dialog" aria-modal="true" aria-labelledby="pg-title">
+    <div class="policy-guide-dialog">
+      <div class="pg-head">
+        <div style="display:flex;align-items:baseline;gap:8px">
+          <h2 id="pg-title">政策引擎教學</h2>
+          <span class="pg-counter" id="pg-counter">1 / 6</span>
+        </div>
+        <button type="button" class="onboard-close" id="pg-close" aria-label="關閉">×</button>
+      </div>
+      <div class="pg-body" id="pg-body"></div>
+      <div class="pg-foot">
+        <div class="pg-dots" id="pg-dots" aria-label="步驟"></div>
+        <div class="pg-nav">
+          <button type="button" class="btn btn-ghost btn-sm" id="pg-skip">跳過</button>
+          <button type="button" class="btn btn-ghost btn-sm" id="pg-prev" hidden>上一步</button>
+          <button type="button" class="btn btn-primary btn-sm" id="pg-next">下一頁</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/app.js" type="module"></script>
+</body>
+</html>

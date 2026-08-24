@@ -22,6 +22,10 @@ export default {
       ctx.waitUntil(supabaseSync.waitForPending());
       return apiRes;
     }
+    const pathname = new URL(request.url).pathname;
+    if (pathname.includes('.bak-')) {
+      return new Response('Not found', { status: 404 });
+    }
     return env.ASSETS.fetch(request);
   },
 };
