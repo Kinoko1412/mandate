@@ -1,5 +1,28 @@
 const { handleFetchRequest } = require('../server/apiFetch');
 const supabaseSync = require('../server/supabaseSync');
+const zkProof = require('../services/proof/zk');
+
+// 真 zk-SNARK 電路在 Workers 需要的靜態資產（build-time import，見
+// services/proof/workersWasmCompat.js 開頭註解為什麼一定要靜態 import，不能在
+// 執行期動態讀檔/編譯）。這幾行本身沒有副作用，實際套用在下面 configureZkAssets()。
+import bn128WasmModule from '../circuits/build/bn128.wasm';
+import carbonProofWasmModule from '../circuits/build/carbon_proof_js/carbon_proof.wasm';
+import carbonProofWasmBytes from '../circuits/build/carbon_proof_js/carbon_proof.wasm.bin';
+import zkeyBytes from '../circuits/build/carbon_proof_final.zkey.bin';
+import verificationKey from '../circuits/build/verification_key.json';
+
+let zkAssetsConfigured = false;
+function ensureZkAssetsConfigured() {
+  if (zkAssetsConfigured) return;
+  zkAssetsConfigured = true;
+  zkProof.configureZkAssets({
+    carbonProofWasmBytes: new Uint8Array(carbonProofWasmBytes),
+    carbonProofWasmModule,
+    zkeyBytes: new Uint8Array(zkeyBytes),
+    verificationKey,
+    bn128WasmModule,
+  });
+}
 
 function applyWorkerEnv(env) {
   if (!env) return;
@@ -12,6 +35,7 @@ function applyWorkerEnv(env) {
 
 export default {
   async fetch(request, env, ctx) {
+    ensureZkAssetsConfigured();
     applyWorkerEnv(env);
     const apiRes = await handleFetchRequest(request);
     if (apiRes) {

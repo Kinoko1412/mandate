@@ -16,6 +16,15 @@ directory = "./public"
 binding = "ASSETS"
 not_found_handling = "single-page-application"
 
+# Day 5：真 zk-SNARK 電路（circuits/carbon_proof.circom）需要的 build-time 靜態資產。
+# .wasm 走 Wrangler 原生的 CompiledWasm 規則（import 直接拿到 WebAssembly.Module）；
+# .bin 是同一份 wasm/zkey 檔案的原始 bytes 副本（snarkjs 的 fullProve 需要 raw bytes
+# 而不是 Module），見 services/proof/workersWasmCompat.js 開頭註解的完整原因。
+[[rules]]
+type = "Data"
+globs = ["**/*.bin"]
+fallthrough = true
+
 # All config below is set via `wrangler secret put <NAME>` (see docs/DEPLOY_CLOUDFLARE.md),
 # not [vars] — a [vars] default with the same name as a secret silently overrides the
 # secret on deploy (wrangler warns but still does it), which broke OPENAI_MODEL when it

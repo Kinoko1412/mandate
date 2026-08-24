@@ -8,3 +8,5 @@ artifacts/
 node_modules/.cache/
 _backups/
 *.bak-*
+.tools/
+*.ptau
