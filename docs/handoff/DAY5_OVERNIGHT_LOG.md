@@ -123,6 +123,36 @@
   x-demo-role」。
 - **既有全部測試（165+6+5+8+7=191 項）重跑確認零回歸**。
 
+### 2.5　追加（使用者醒來後即時討論）：OCR+LLM 兩階段改成直接讀圖 — ✅ 完成
+
+使用者看完 PDF 後問「為什麼不直接用支援圖像辨識的模型（如 Gemini），而是先研究 OCR」。
+誠實回答原因（沒查證過 `gpt-5-mini` 支不支援圖片輸入、Tesseract 剛好已裝、統一文字管線）
+後，使用者要求「還是我們測試看看」。**實測結果推翻了原本的保守假設**：
+
+- `openai/gpt-5-mini` 經 OpenRouter **確實支援** `image_url` 直接讀圖，第一次呼叫就成功，
+  而且比 Tesseract OCR 讀得更乾淨（沒有 OCR 那次的 `unit=>MWh` 雜訊）。
+- 直接讀圖做結構化抽取，單次呼叫成本 $0.000554，跟兩階段管線同量級，不算貴。
+- **更關鍵的問題（我原本沒想清楚）**：`services/agent/ocr.js` 用
+  `child_process.spawnSync('tesseract', ...)` 呼叫本機 CLI，**這條路徑只能在 Node 跑，
+  Cloudflare Workers 沒有 child process 能力，圖片證據部署到 Workers 後會直接失敗**——
+  這是真實的架構缺口，不是使用者吹毛求疵。
+- 圖片版 prompt injection 抵抗力也另外用合成測試圖驗證過（圖片裡明顯嵌入「SYSTEM
+  OVERRIDE」指令文字，模型仍只抽出真實存在的欄位）。
+
+**執行的改動**：
+- `services/agent/llmExtract.js`：`extractEntriesWithLlm()` 改成同時支援
+  `documentText`（文字模式）跟 `imageBase64`/`imageMediaType`（圖片模式，`image_url`
+  content block），同一套 system prompt、同一套下游流程。
+- `services/agent/analyzeLlm.js`：`decodeEvidenceForLlm()` 圖片證據直接回傳
+  base64+mediaType，不再呼叫 OCR；文件層級 injection 關鍵字掃描維持只對文字模式做（圖片
+  沒有解碼出來的文字可掃），下游 `normalizeEntry()` 白名單過濾對兩種模式一視同仁，是不受
+  輸入模態影響的第二道防線。
+- **`services/agent/ocr.js` 已刪除**（不再被任何地方引用）。
+- 測試新增一項圖片版 injection 測試（`tests/agent/fixtures/production_injected_scan.png`），
+  原本的「OCR」測試改名成「直接讀圖」測試。`smoke:evidence-agent-llm` 6/6 全過（比原本多
+  一項）。
+- 既有全部測試重跑確認零回歸。
+
 ### 5. `schema-v1.json` 接上 ajv — ✅ 完成（低優先項目，順手做掉）
 
 - `packages/contracts/validator.js` 原本是手寫的最小 JSON Schema 子集驗證器（只認得

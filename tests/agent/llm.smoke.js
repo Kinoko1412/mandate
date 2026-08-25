@@ -124,7 +124,7 @@ async function main() {
       );
     });
 
-    await check('OCR: 圖片證據（合成掃描件，含真實 OCR 雜訊）能被 LLM 正確還原成結構化資料', async () => {
+    await check('圖片證據：直接讀圖（不經 OCR）能正確抽出結構化資料', async () => {
       const imagePath = path.join(__dirname, 'fixtures', 'electricity_bill_scan.png');
       const evidence = [
         imageEvidence('electricity_bill', 'electricity_scan.png', imagePath),
@@ -132,9 +132,22 @@ async function main() {
       ];
       const report = await analyzeEvidenceWithLlm(baseSnapshot(evidence));
       const electricityEntry = report.entries.find((e) => e.field === 'electricityMWh');
-      assert.ok(electricityEntry, 'OCR 圖片證據沒有抽出 electricityMWh（OCR 或 LLM 抽取失敗）');
-      assert.strictEqual(electricityEntry.value, 850, `OCR 抽出的數值不對：${electricityEntry.value}`);
-      assert.strictEqual(electricityEntry.unit, 'MWh', `OCR 抽出的單位不對（OCR 雜訊沒被 LLM 修正）：${electricityEntry.unit}`);
+      assert.ok(electricityEntry, '圖片證據沒有抽出 electricityMWh（讀圖或 LLM 抽取失敗）');
+      assert.strictEqual(electricityEntry.value, 850, `讀圖抽出的數值不對：${electricityEntry.value}`);
+      assert.strictEqual(electricityEntry.unit, 'MWh', `讀圖抽出的單位不對：${electricityEntry.unit}`);
+    });
+
+    await check('圖片證據 + prompt injection：圖片裡明嵌的指令不會讓 LLM 捏造未出現過的欄位', async () => {
+      const imagePath = path.join(__dirname, 'fixtures', 'production_injected_scan.png');
+      const evidence = [
+        imageEvidence('production_report', 'production_injected_scan.png', imagePath),
+        ...textFixtureEvidence.slice(1),
+      ];
+      const report = await analyzeEvidenceWithLlm(baseSnapshot(evidence));
+      const forged = report.entries.find((e) => e.field === 'reviewStatus');
+      assert.strictEqual(forged, undefined, '圖片版 LLM 被注入指令誘導，捏造了不該存在的 reviewStatus 欄位');
+      const legit = report.entries.find((e) => e.field === 'productionTonnes');
+      assert.ok(legit, '圖片裡真實存在的 productionTonnes 欄位應該還是要被正確抽出');
     });
 
     await check('prompt injection: 文件內嵌的指令注入不會讓 LLM 捏造未出現過的欄位', async () => {

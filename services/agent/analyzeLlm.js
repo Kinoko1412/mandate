@@ -40,7 +40,6 @@ const {
 } = require('./index');
 const { AGENT_REASON_CODE, AGENT_REVIEW_STATUS } = require('../../packages/contracts/enums');
 const { extractEntriesWithLlm, PROMPT_VERSION: LLM_PROMPT_VERSION } = require('./llmExtract');
-const { ocrImageBuffer } = require('./ocr');
 
 const IMAGE_MEDIA_TYPES = new Set(['image/png', 'image/jpeg', 'image/jpg']);
 
@@ -51,7 +50,13 @@ function stableStringify(value) {
   return `{${keys.map((k) => `${JSON.stringify(k)}:${stableStringify(value[k])}`).join(',')}}`;
 }
 
-/** 跟 decodeEvidence() 一樣的角色，但圖片證據走 OCR，文字證據直接 decode。 */
+/**
+ * 圖片證據直接讀圖交給 LLM（見 llmExtract.js 檔頭註解：實測 gpt-5-mini 支援 image_url，
+ * 比原本的 OCR 中間層更準，也修掉 OCR 只能在 Node 跑、Workers 會壞掉的問題）；文字證據
+ * 照舊 decode。回傳的形狀讓呼叫端決定要不要做「文字內容層級」的 injection 關鍵字掃描
+ * （圖片沒有這個步驟——沒有解碼出來的文字可以掃，安全網落在下游 normalizeEntry() 那層，
+ * 見本檔案開頭跟 llmExtract.js 的說明）。
+ */
 function decodeEvidenceForLlm(item) {
   if (item.mediaType && IMAGE_MEDIA_TYPES.has(item.mediaType)) {
     if (typeof item.contentBase64 !== 'string' || !item.contentBase64) {
@@ -59,10 +64,9 @@ function decodeEvidenceForLlm(item) {
         evidenceId: item.evidenceId,
       });
     }
-    const buffer = Buffer.from(item.contentBase64, 'base64');
-    return ocrImageBuffer(buffer);
+    return { mode: 'image', imageBase64: item.contentBase64, imageMediaType: item.mediaType };
   }
-  return decodeEvidence(item);
+  return { mode: 'text', text: decodeEvidence(item) };
 }
 
 /**
@@ -116,13 +120,17 @@ async function analyzeEvidenceWithLlm(snapshot, options = {}) {
   }
 
   for (const item of snapshot.evidence) {
-    const text = decodeEvidenceForLlm(item);
+    const decoded = decodeEvidenceForLlm(item);
     const safeSourceFile =
       typeof item.filename === 'string' && SAFE_SOURCE_FILE.test(item.filename) ? item.filename : item.evidenceId;
 
-    // 跟規則引擎同一道防線：文件層級的 injection 關鍵字檢查一律在 LLM 呼叫**之前**執行，
-    // 命中就整份丟棄，連內容都不會被送進 LLM prompt。
-    if (containsInjection(text) || containsInjection(item.filename) || containsInjection(item.source)) {
+    // 跟規則引擎同一道防線：文字證據的 injection 關鍵字檢查一律在 LLM 呼叫**之前**執行，
+    // 命中就整份丟棄，連內容都不會被送進 LLM prompt。圖片證據沒有解碼出來的文字可以掃
+    // （直接讀圖，不再先 OCR），這一格改成 skip；已用合成測試圖驗證過圖片版的 injection
+    // 抵抗力（模型本身會拒絕被圖片裡的指令文字誘導），且下游 normalizeEntry() 的白名單
+    // 過濾對兩種模式一視同仁，是不受輸入模態影響的第二道防線。
+    const contentInjectionHit = decoded.mode === 'text' && containsInjection(decoded.text);
+    if (contentInjectionHit || containsInjection(item.filename) || containsInjection(item.source)) {
       addFinding(
         AGENT_REASON_CODE.PROMPT_INJECTION_DETECTED,
         'high',
@@ -147,7 +155,9 @@ async function analyzeEvidenceWithLlm(snapshot, options = {}) {
 
     // 每份文件各自獨立呼叫，不共用 context——這是隊長明確裁示的資料最小化設計。
     const { rawEntries, modelVersion: usedModelVersion } = await extractEntriesWithLlm({
-      documentText: text,
+      documentText: decoded.mode === 'text' ? decoded.text : undefined,
+      imageBase64: decoded.mode === 'image' ? decoded.imageBase64 : undefined,
+      imageMediaType: decoded.mode === 'image' ? decoded.imageMediaType : undefined,
       filename: safeSourceFile,
       evidenceType: item.type,
       persistPromptResponse: options.persistPromptResponse,
