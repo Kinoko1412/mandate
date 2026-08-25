@@ -52,6 +52,16 @@ const POLICY_REGISTRY = Object.freeze([
     version: '1',
     effectiveFrom: '2026-01-01',
     effectiveTo: null,
+    // Day 5：ZK 電路／碳足跡憑證要用的合規上限（circuits/README.md 早先標記過的缺口：
+    // 「Policy Registry 目前沒有這個欄位」）。刻意**不**加進 SNAPSHOT_FIELDS——那份清單
+    // 是 Day 3 trust gate 逐項比對案件宣稱值用的，43 項既有測試的 fixture 都沒有這個欄位，
+    // 加進去會讓它們全部變成 POLICY_NOT_APPLICABLE。這個欄位只給新的憑證簽發流程
+    // （services/credential）直接查 registry 用，不是 gate 快照比對的一部分。
+    // 400 tCO2e（10^6 定點，對齊 fixedPoint.js）。TW-STEEL-01 demo 案件真實數字是
+    // verifiedIntensity 1.8 tCO2e/tonne × productionTonnes 200 = 360 tCO2e，故意訂在
+    // 那之上一點，讓 demo 主線案件簽出來的憑證是 compliant=true（不合規情境另外在
+    // tests/trust/zk.smoke.js 用不同數字測過，見「non-compliant」那項）。
+    complianceThresholdScaled: 400_000_000,
     demoOnly: true,
   }),
   // --- 以下為攻擊測試用的 Demo 記錄，不是正式治理清單 ---

@@ -3,6 +3,10 @@
 /**
  * tests/dpp/smoke.js — GS1/DPP 分層揭露最小示意（services/dpp + server/workflowApi.js
  * handleDppApi）。跟其他測試套件同一種風格。
+ *
+ * Day 5 追加②之後，customs 層的 comparison 欄位是有條件的（案件要 READY_FOR_VERIFIER
+ * 才給），所以這裡也測兩個分支：條件不成立時的占位訊息、條件成立時的真實比較數字——不是
+ * 只測「政策存在」，是真的把案件推到兩種狀態各驗一次。
  */
 
 const assert = require('assert');
@@ -10,14 +14,58 @@ const { handleFetchRequest } = require('../../server/apiFetch');
 const workflowStore = require('../../server/workflowStore');
 
 const CASE_ID = 'CASE-2026-001';
+const FULL_YEAR = { coveredFrom: '2026-01-01', coveredTo: '2026-12-31' };
 let passed = 0;
 let failed = 0;
 
-async function api(path, extraHeaders = {}) {
-  const request = new Request(`http://dpp.test${path}`, { method: 'GET', headers: extraHeaders });
+async function api(path, method = 'GET', role, body, extraHeaders = {}) {
+  const headers = { ...extraHeaders };
+  if (role) headers['x-demo-role'] = role;
+  if (body !== undefined) headers['content-type'] = 'application/json';
+  const request = new Request(`http://dpp.test${path}`, {
+    method,
+    headers,
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
   const response = await handleFetchRequest(request);
   assert.ok(response, `API route ${path} should be handled`);
   return { status: response.status, body: await response.json() };
+}
+
+function contentBase64(text) {
+  return Buffer.from(text, 'utf8').toString('base64');
+}
+
+/** 走真實 HTTP 把 Demo 案件推到 READY_FOR_VERIFIER，沿用 tests/trust/smoke.js 同一套模式。 */
+async function submitCaseToReady() {
+  await api('/api/workflow/reset', 'POST', 'Supplier', {});
+  const specs = [
+    ['electricity_bill', 'elec.pdf', 'dpp-smoke-elec'],
+    ['fuel_ledger', 'fuel.pdf', 'dpp-smoke-fuel'],
+    ['production_report', 'prod.pdf', 'dpp-smoke-prod'],
+    ['precursor_list', 'prec.pdf', 'dpp-smoke-precursor'],
+  ];
+  const uploaded = [];
+  for (const [type, filename, text] of specs) {
+    const response = await api('/api/evidence', 'POST', 'Supplier', {
+      caseId: CASE_ID,
+      filename,
+      mediaType: 'application/pdf',
+      contentBase64: contentBase64(text),
+      metadata: { type, coveredFrom: FULL_YEAR.coveredFrom, coveredTo: FULL_YEAR.coveredTo, source: 'demo' },
+    });
+    assert.strictEqual(response.status, 201);
+    uploaded.push(response.body.evidence);
+  }
+  for (const evidence of uploaded) {
+    const response = await api(`/api/evidence/${evidence.evidenceId}/confirm`, 'POST', 'Supplier', { confirmed: true });
+    assert.strictEqual(response.status, 200);
+  }
+  const submit = await api(`/api/cases/${CASE_ID}/submit`, 'POST', 'Supplier', {});
+  assert.strictEqual(submit.status, 200);
+  const revalidate = await api('/api/workflow/revalidate', 'POST', 'Supplier', {});
+  assert.strictEqual(revalidate.status, 200);
+  assert.strictEqual(revalidate.body.case.status, 'READY_FOR_VERIFIER');
 }
 
 async function check(label, fn) {
@@ -52,11 +100,23 @@ async function main() {
     assert.ok(!('policyProfileId' in body), 'customer 層不應該看到 policyProfileId');
   });
 
-  await check('customs: 看得到完整比較資訊（等同既有 Importer 摘要深度）', async () => {
+  await check('customs（政策條件不成立）：案件還沒 READY_FOR_VERIFIER 之前，comparison 是明確占位訊息，不是提前洩漏數字', async () => {
+    // main() 一開始的 workflowStore.reset() 讓案件停在 DRAFT，還沒推進到 READY_FOR_VERIFIER。
     const { status, body } = await api(`/api/dpp/cases/${CASE_ID}?role=customs`);
     assert.strictEqual(status, 200);
     assert.strictEqual(body.disclosureLevel, 'customs');
-    assert.ok(body.comparison && typeof body.comparison.actualIntensity === 'number');
+    assert.strictEqual(body.comparison.withheld, true, '條件不成立時應該是占位訊息，不是真數字');
+    assert.strictEqual(typeof body.comparison.actualIntensity, 'undefined');
+    assert.ok(body.policyProfileId, 'shipmentCount/policyProfileId 不受這個條件影響，還是要看得到');
+  });
+
+  await check('customs（政策條件成立）：案件推進到 READY_FOR_VERIFIER 之後，comparison 變成真的比較數字', async () => {
+    await submitCaseToReady();
+    const { status, body } = await api(`/api/dpp/cases/${CASE_ID}?role=customs`);
+    assert.strictEqual(status, 200);
+    assert.strictEqual(body.status, 'READY_FOR_VERIFIER');
+    assert.strictEqual(body.comparison.withheld, undefined);
+    assert.ok(typeof body.comparison.actualIntensity === 'number');
     assert.ok(body.policyProfileId);
   });
 

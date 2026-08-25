@@ -217,9 +217,28 @@ function verifyIdentityContext(identityContext, options = {}) {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Day 5：簽發碳足跡憑證（services/credential）需要每個身份有一把簽章金鑰。
+// ---------------------------------------------------------------------------
+//
+// 每個 registry 裡的 actorId 在模組載入時各自產生一把真的 Ed25519 金鑰對（不是假的）。
+// **已知限制**（跟 services/proof 的 in-memory nonce ledger 同一種、已經是這個專案一路
+// 誠實標記的限制類型）：金鑰只存在這次 process 的記憶體，重啟就換一把新的——用這把舊金鑰
+// 簽出去的憑證，重啟後會驗證失敗。真實世界裡這把私鑰應該由供應商自己持有、不會給平台碰，
+// 這裡刻意把「簽發」也放在同一個 demo 系統內只是為了讓 hackathon 展示可以端到端跑起來。
+const SIGNING_KEYS = new Map();
+function getSigningKeyPair(actorId) {
+  if (!IDENTITY_REGISTRY[actorId]) return null;
+  if (!SIGNING_KEYS.has(actorId)) {
+    SIGNING_KEYS.set(actorId, crypto.generateKeyPairSync('ed25519'));
+  }
+  return SIGNING_KEYS.get(actorId);
+}
+
 module.exports = {
   GATE_DECISION,
   IDENTITY_REGISTRY,
   getIdentityRecord,
   verifyIdentityContext,
+  getSigningKeyPair,
 };
