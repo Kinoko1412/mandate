@@ -38,15 +38,24 @@ const result = verifyIdentityContext(identityContext, { now: new Date() });
 5. 角色憑證：I2I 指標檢查（`issuerCredentialId` 必須指向法人憑證本身）、撤銷、過期
 6. `credentialRefs`（如果呼叫端有帶）逐項比對 Registry 的真實憑證 ID，抓偽造
 
+## 已接進即時流程（2026-08-26）
+
+原本「還沒接進 Gate 判斷鏈」的狀態已經改變：`server/trustAdapter.js` 的
+`verifyLiveIdentityForCase()` 現在會呼叫這裡的 `verifyIdentityContext()`，讓案件的供應商組織
+是否有有效 vLEI 身份鏈，真的影響案件能不能到 `READY_FOR_VERIFIER`（細節與橋接方式見
+`circuits/README.md`「vLEI 身份鏈驗證接進即時流程」一節——registry 主鍵是 `actorId`，跟
+workflow 層的 `supplierOrgId` 要透過新增的 `findActorIdByOrgId()` 反查橋接）。這個模組本身
+的驗證邏輯（本檔案上面幾節）完全沒有改動，只是多了一個真正的呼叫端。
+
 ## 已知限制
 
 - Registry 是寫死的 Demo 清單，只收錄測試需要的三種情境（正常／已撤銷／已過期），不是真的
   QVI／GLEIF 發證流程或外部驗證服務。
-- 目前**還沒接進** `services/policy-gate` 的判斷鏈——這個模組獨立可用、獨立測試過，要不要
-  讓身份驗證結果影響 Gate 判斷（例如身份不合格時案件狀態要不要連動）是需要 A/B 一起決定的
-  範圍問題，跟 `circuits/README.md` 裡 ZK 電路的「架構決策」一節是同一種性質的待辦。
 - 沒有實作憑證的**發行**流程（怎麼從 GLEIF/QVI 拿到一張新憑證），只做**驗證**已存在憑證鏈
   的有效性——這跟舊 fork 的範圍一致，不是這次新增的限制。
+- `findActorIdByOrgId()` 的橋接是「剛好對得上」的 demo 資料巧合（見上一節），不是有資料庫
+  外鍵保證的正式關聯——正式產品化需要讓 workflow 層的組織識別跟 vLEI registry 的 actorId
+  是同一套身份系統，不是兩套各自獨立的 demo 資料互相猜。
 
 ## 測試
 

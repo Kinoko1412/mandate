@@ -3,46 +3,40 @@
 /**
  * packages/contracts/validator.js — canonical schema-v1.json 的執行期驗證器。
  *
- * Day 5 前：這裡是一個手寫的最小 JSON Schema 子集驗證器（只認得 type/enum/
- * exclusiveMinimum/required/properties/items/$ref），功能上涵蓋了既有測試案例需要的
- * 檢查，但不是真的 JSON Schema draft-07 規格實作（例如完全沒檢查 additionalProperties、
- * pattern、format、minLength/maxLength 這類關鍵字，schema 裡寫了也不會真的被驗）。
+ * Day 5：從手寫的最小 JSON Schema 子集驗證器換成用 ajv（真正的 JSON Schema draft-07
+ * 驗證器）編譯 schema-v1.json 本身，執行期驗證是真的照 schema 逐條規則跑。
  *
- * Day 5：換成用 ajv（真正的 JSON Schema draft-07 驗證器）編譯 schema-v1.json 本身，執行期
- * 驗證是真的照 schema 逐條規則跑，不是手寫邏輯的近似值。對外介面完全不變
- * （`validateCanonical(entityName, value) -> {valid, errors}`），呼叫端（agentAdapter.js、
- * services/proof、tests/ 全部套件）不用改一行。
+ * Day 5 追加（2026-08-26 部署才發現）：ajv 在執行期呼叫 `new Function()` 產生驗證函式，
+ * 部署到 Cloudflare Workers 時直接炸掉——`EvalError: Code generation from strings
+ * disallowed for this context`。查證過 Cloudflare **完全沒有**任何 compatibility flag
+ * 能開放 unsafe-eval（不是還沒找到設定方式，是這個平台的硬限制），社群/官方 issue 一致
+ * 建議的解法是離線預編譯——跟今晚稍早 ZK 電路 wasm 離線預編譯是同一種策略：不在執行期
+ * 動態編譯，改成 build-time 產生靜態 JS 產物、直接 require()。
  *
- * 驗證方式：把整份 schema-v1.json 的 `definitions` 一起交給 ajv（`addSchema` 用
- * `#/definitions/xxx` 當 $id 讓 $ref 能互相解析），對每個 canonical entity 各自編譯一支
- * validate function、cache 起來（compile 有成本，不要每次呼叫都重編）。
+ * 實際做法：`packages/contracts/buildValidators.js`（手動執行，改 schema-v1.json 後要
+ * 重跑）用 ajv 官方支援的 "standalone code" 模式，把每個 canonical entity 的驗證函式
+ * 編譯成純 JS 原始碼，輸出到 `compiledValidators.js`（已檢查過，裡面完全沒有
+ * `new Function`，Node/Workers 都能直接 require()）。這裡只是 require 那份靜態產物，
+ * 不再持有 Ajv instance。對外介面完全不變（`validateCanonical(entityName, value) ->
+ * {valid, errors}`），呼叫端（agentAdapter.js、services/proof、tests/ 全部套件）
+ * 不用改一行。
  */
 
-const Ajv = require('ajv');
-const addFormats = require('ajv-formats');
 const schema = require('./schema-v1.json');
-
-const ajv = new Ajv({ allErrors: true, strict: false });
-addFormats(ajv);
-
-// 把每個 definition 各自註冊成一份可以互相 $ref 的獨立 schema（$id 用
-// `#/definitions/xxx`，剛好對應 schema-v1.json 本來就用的 $ref 慣例，不用改任何
-// entity 定義本身的寫法）。
-for (const [name, definition] of Object.entries(schema.definitions)) {
-  ajv.addSchema({ ...definition, $id: `#/definitions/${name}` }, `#/definitions/${name}`);
-}
-
-const compiledValidators = new Map();
+const compiledValidators = require('./compiledValidators');
 
 function getValidator(entityName) {
-  if (compiledValidators.has(entityName)) return compiledValidators.get(entityName);
   const definition = schema.definitions[entityName];
   if (!definition || definition.type !== 'object') {
     throw new Error(`未知 canonical entity：${entityName}`);
   }
-  const validate = ajv.getSchema(`#/definitions/${entityName}`);
-  if (!validate) throw new Error(`ajv 找不到已編譯的 schema：${entityName}`);
-  compiledValidators.set(entityName, validate);
+  const validate = compiledValidators[entityName];
+  if (!validate) {
+    throw new Error(
+      `compiledValidators.js 沒有 ${entityName} 的預編譯驗證函式——如果剛改過 ` +
+        `schema-v1.json，記得重跑 node packages/contracts/buildValidators.js。`
+    );
+  }
   return validate;
 }
 

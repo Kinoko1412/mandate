@@ -12,6 +12,8 @@ const {
   buildIntensityCommitment,
   consumeNonces,
 } = require('../services/proof');
+const zk = require('../services/proof/zk');
+const identity = require('../services/identity');
 const { evaluateGate, evaluateEvidenceCoverage } = require('../services/policy-gate');
 const workflowStore = require('./workflowStore');
 
@@ -97,10 +99,16 @@ function validateResult(result) {
 // Day 3 — 真實 trust engine（services/policy-registry + services/factor-registry +
 // services/proof + services/policy-gate），取代預設的 unavailable evaluator。
 //
-// 誠實揭露：`services/proof` 沒有跑 zk-SNARK 電路（見該模組檔頭註解），`ProofEnvelope.proof`
-// 是 demoOnly 的 SHA-256 commitment。commitment 會被現場重算並以 timingSafeEqual 比對，
-// 偽造 proof bytes 會被擋；但 commitment 的輸入全部是公開值，因此它**不是** cryptographic
-// proof，不得對外宣稱已完成正式 ZKP 驗證。
+// 誠實揭露（Day 5 追加③更新）：`services/proof`（envelope／nonce／context-binding 那層）
+// 本身仍然是 demoOnly 的 SHA-256 commitment，不是 cryptographic proof——這層繼續防「這份
+// proof 是不是被套到別的案件／批次／年度」。**但**正式 evaluator（productionEvaluator，
+// 即時流程實際會走到的路徑）現在額外疊加了真的 zk-SNARK 驗證
+// （evaluateTrustScenarioWithRealZk → verifyRealZkForShipment → services/proof/zk.js，
+// 真 Circom 電路 + snarkjs groth16），對每一批獨立證明
+// `intensityScaled × quantityTonnesScaled = allocatedEmissionsScaled` 且落在政策合規
+// 門檻內。兩層合起來才是完整故事：commitment 層防「换批套用」，zk 層防「總數字是不是真的
+// 從私密分量正確算出來」。只有設定了 complianceThresholdScaled 的政策版本（目前僅
+// CBAM-STEEL-2026-v1）會觸發真電路，其餘版本這一步會顯示 skipped，不影響既有行為。
 //
 // P1 修正重點：期望值（expected context）一律由本模組從 **workflow store 持有的案件快照**
 // 獨立重建——case、installationYear、shipments、evidence、以及 Policy／Factor Registry 的
@@ -538,6 +546,172 @@ function finalize({ proofOk, proofChecks, proofReasonCodes, gateResult, inputHas
 }
 
 /**
+ * Day 5 追加③：把 `circuits/carbon_proof.circom` 的真 zk-SNARK 電路接進「逐批」驗證，
+ * 對單一批次證明 `intensityScaled × quantityTonnesScaled = allocatedEmissionsScaled`
+ * 且落在政策合規門檻內——電路輸入映射沿用 `services/credential/index.js` 已經在用、
+ * 也是 `circuits/README.md` 當初寫好的建議路徑：
+ *   quantityScaled = [intensityScaled, 0, 0, 0]        // 私密：製程效率
+ *   factorScaled   = [quantityTonnesScaled, 0, 0, 0]   // 公開：這一批的出貨量
+ * 電路算出的 totalScaled 因此等於 intensityScaled × quantityTonnesScaled，即
+ * mulScaled() 已經在算的 allocatedEmissionsScaled——兩者算法一致，可以互相核對。
+ *
+ * 這是**額外疊加**在既有 verifyProofEnvelope（demo commitment）之上的第二層，不是取代它
+ * ——跟 circuits/README.md、services/proof/zk.js 開頭記錄的架構決策一致。沒有設定
+ * complianceThresholdScaled 的政策版本（目前只有 CBAM-STEEL-2026-v1 有設）直接跳過，
+ * 回傳 skipped，不影響其他政策版本的既有行為。
+ */
+async function verifyRealZkForShipment(trustContext, expectation) {
+  const threshold = trustContext.policyRecord && trustContext.policyRecord.complianceThresholdScaled;
+  if (!Number.isFinite(threshold)) {
+    return {
+      ok: null,
+      check: makeCheck(
+        'real_zk_proof',
+        'skipped',
+        `[${expectation.shipmentId}] 此政策版本未設定 complianceThresholdScaled，略過真實 zk-SNARK 電路驗證。`
+      ),
+    };
+  }
+  try {
+    const zkResult = await zk.generateRealZkProof({
+      quantityScaled: [trustContext.intensityScaled, 0, 0, 0],
+      factorScaled: [expectation.quantityTonnesScaled, 0, 0, 0],
+      complianceThresholdScaled: threshold,
+    });
+    const proofValid = await zk.verifyRealZkProof({
+      proof: zkResult.proof,
+      publicSignals: zkResult.publicSignals,
+    });
+    if (!proofValid) {
+      return {
+        ok: false,
+        reasonCode: REASON_CODE.PROOF_INVALID,
+        check: makeCheck('real_zk_proof', 'fail', `[${expectation.shipmentId}] 真實 zk-SNARK proof 驗證失敗。`),
+      };
+    }
+    // 只驗證 proof 本身合法還不夠——一定要交叉比對電路實際算出的 totalScaled 是不是真的
+    // 等於已存檔的分攤結果，否則一份「自己算對、但跟這批貨無關」的合法 proof 也會被誤採信。
+    // 跟 services/credential/index.js 的 verifyCarbonFootprintVC() 是同一種防禦縱深。
+    if (zkResult.totalScaled !== expectation.allocatedEmissionsScaled) {
+      return {
+        ok: false,
+        reasonCode: REASON_CODE.PUBLIC_INPUT_MISMATCH,
+        check: makeCheck(
+          'real_zk_proof',
+          'fail',
+          `[${expectation.shipmentId}] 電路算出的 totalScaled(${zkResult.totalScaled}) 與已存檔分攤結果(${expectation.allocatedEmissionsScaled}) 不一致。`
+        ),
+      };
+    }
+    return {
+      ok: true,
+      check: makeCheck(
+        'real_zk_proof',
+        'pass',
+        `[${expectation.shipmentId}] 真實 zk-SNARK proof 驗證通過（totalScaled=${zkResult.totalScaled}，compliant=${zkResult.compliant}）`
+      ),
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      reasonCode: REASON_CODE.PROOF_INVALID,
+      check: makeCheck('real_zk_proof', 'fail', `[${expectation.shipmentId}] 真實 zk-SNARK proof 產生/驗證發生錯誤：${error.message}`),
+    };
+  }
+}
+
+/**
+ * Day 5 追加③：vLEI 身份鏈驗證接進即時流程。`services/identity` 一直是獨立、沒人呼叫的
+ * 模組——這裡讓案件的供應商組織（`caseRecord.supplierOrgId`）真的要在 vLEI Registry
+ * 裡有一條有效的身份鏈（法人憑證＋角色憑證，未撤銷未過期），案件才能判 GATE_OK。
+ *
+ * `services/identity` 的 registry 主鍵是 actorId，跟 workflow 層的 `supplierOrgId` 目前
+ * 各自獨立建立，用 `identity.findActorIdByOrgId()` 反查橋接（見該函式註解）。找不到對應
+ * actorId，視同「這個組織沒有 vLEI 身份」，直接判定失敗，不是默默略過檢查。
+ */
+function verifyLiveIdentityForCase(trustContext) {
+  const orgId = trustContext.caseRecord && trustContext.caseRecord.supplierOrgId;
+  const actorId = orgId ? identity.findActorIdByOrgId(orgId) : null;
+  if (!actorId) {
+    return {
+      ok: false,
+      reasonCode: REASON_CODE.AUTHORIZATION_INVALID,
+      check: makeCheck('vlei_identity', 'fail', `供應商組織 ${orgId || '(缺失)'} 不在 vLEI 身份憑證 Registry 內。`),
+    };
+  }
+  const result = identity.verifyIdentityContext({ actorId, orgId });
+  if (result.decision !== identity.GATE_DECISION.OK) {
+    return {
+      ok: false,
+      reasonCode: result.reasonCodes[0] || REASON_CODE.AUTHORIZATION_INVALID,
+      check: makeCheck(
+        'vlei_identity',
+        'fail',
+        `供應商 vLEI 身份未通過驗證（${actorId}）：${result.reasonCodes.join(', ')}`
+      ),
+    };
+  }
+  return {
+    ok: true,
+    check: makeCheck('vlei_identity', 'pass', `供應商 ${orgId}（${actorId}）vLEI 身份鏈驗證通過`),
+  };
+}
+
+/**
+ * 包在既有（同步）evaluateTrustScenario() 外面的 async 疊加層，只給 productionEvaluator
+ * 用——tests/trust/smoke.js 大量直接同步呼叫 evaluateTrustScenario() 組攻擊情境，刻意
+ * 不改動那個函式的簽章/行為，避免動到那 40 幾項既有測試。既有防線（demo commitment、
+ * policy/factor/evidence）沒過就不用多花時間跑真電路／查身份——這兩項是錦上添花的
+ * 額外防線，不是取代既有防線的第一關守門，用 `gate.verification==='verified'`
+ * 判斷「既有防線都過了」比只看 proof 更準確（Gate 還可能因為 evidence/policy 沒過）。
+ */
+async function evaluateTrustScenarioLive(input) {
+  const result = evaluateTrustScenario(input);
+  const trustContext = input.trustContext;
+  if (!trustContext.ok || result.gate.verification !== 'verified') {
+    return result;
+  }
+
+  const identityOutcome = verifyLiveIdentityForCase(trustContext);
+
+  const zkOutcomes = [];
+  for (const expectation of trustContext.shipmentExpectations) {
+    zkOutcomes.push(await verifyRealZkForShipment(trustContext, expectation));
+  }
+
+  const extraChecks = [identityOutcome.check, ...zkOutcomes.map((outcome) => outcome.check)];
+  const failedOutcomes = [identityOutcome, ...zkOutcomes].filter((outcome) => outcome.ok === false);
+
+  if (!failedOutcomes.length) {
+    return {
+      ...result,
+      proof: { ...result.proof, checks: [...result.proof.checks, ...extraChecks] },
+    };
+  }
+
+  const extraReasonCodes = [...new Set(failedOutcomes.map((outcome) => outcome.reasonCode))];
+  return {
+    ...result,
+    proof: {
+      ...result.proof,
+      verification: 'failed',
+      checks: [...result.proof.checks, ...extraChecks],
+      reasonCodes: [...new Set([...result.proof.reasonCodes, ...extraReasonCodes])],
+    },
+    gate: {
+      ...result.gate,
+      verification: 'failed',
+      reasonCodes: [...new Set([...result.gate.reasonCodes, ...extraReasonCodes])],
+    },
+    gateResult: {
+      ...result.gateResult,
+      decision: 'BLOCKED',
+      reasonCodes: [...new Set([...(result.gateResult.reasonCodes || []), ...extraReasonCodes])],
+    },
+  };
+}
+
+/**
  * 正式（非 unavailable）evaluator：每次呼叫都從 workflow store 當下的案件快照重建
  * 期望上下文、重新產生逐批 ProofEnvelope、再跑完整驗證鏈。呼叫端傳進來的 inputHash
  * 只被當成宣稱值比對；任何人塞任意 inputHash 都會得到 PUBLIC_INPUT_MISMATCH。
@@ -563,7 +737,7 @@ async function productionEvaluator(input) {
   }
 
   const proofEnvelopes = generateShipmentProofEnvelopes(trustContext);
-  const { proof, gate } = evaluateTrustScenario({
+  const { proof, gate } = await evaluateTrustScenarioLive({
     trustContext,
     proofEnvelopes,
     claimedInputHash: input && input.inputHash,
@@ -607,6 +781,9 @@ module.exports = {
   expectedPublicInputs,
   generateShipmentProofEnvelopes,
   evaluateTrustScenario,
+  evaluateTrustScenarioLive,
+  verifyRealZkForShipment,
+  verifyLiveIdentityForCase,
   runDemoAttackScenario,
   productionEvaluator,
 };

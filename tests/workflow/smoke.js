@@ -766,6 +766,20 @@ async function main() {
     }
   });
 
+  await check('agent default: 即時端點現在預設走 LLM（agentAdapter.analyzeCaseWithLlm），沒設 API key 時誠實回報 usedFallback 且不當成 HTTP 錯誤', async () => {
+    const analyzed = await api('POST', `/api/cases/${CASE_ID}/agent/analyze`, 'Supplier', {});
+    assert.strictEqual(analyzed.status, 200, 'LLM 不可用時應該優雅退回規則引擎，不是回 HTTP 錯誤');
+    assert.strictEqual(analyzed.body.usedFallback, true, '這個測試環境沒有 OPENAI_API_KEY，應該真的有退回規則引擎');
+    assert.ok(typeof analyzed.body.fallbackReason === 'string' && analyzed.body.fallbackReason, 'usedFallback 為 true 時要附上原因，不能只給布林值');
+    assert.strictEqual(analyzed.body.report.caseId, CASE_ID, 'report 本體形狀跟純規則引擎版本一致');
+
+    const audit = await api('GET', `/api/cases/${CASE_ID}/audit`, 'Supplier');
+    const event = [...audit.body.events].reverse().find((item) => item.action === 'EVIDENCE_AGENT_ANALYZE' && item.result === 'ALLOW');
+    assert.ok(event);
+    assert.strictEqual(event.usedFallback, true, 'usedFallback 要真的被存進稽核紀錄，不是只在 HTTP 回應裡曇花一現');
+    assert.strictEqual(event.fallbackReason, analyzed.body.fallbackReason);
+  });
+
   await check('agent alias: canonical /api/agent/analyze 接受 body.caseId 且仍限 Supplier', async () => {
     const analyzed = await api('POST', '/api/agent/analyze', 'Supplier', { caseId: CASE_ID });
     assert.strictEqual(analyzed.status, 200);

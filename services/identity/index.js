@@ -116,6 +116,20 @@ function getIdentityRecord(actorId) {
 }
 
 /**
+ * Day 5 追加③：vLEI 接進 Policy Gate 即時流程時，trustAdapter 手上有的是案件的
+ * `supplierOrgId`（workflow 層的組織識別），不是這個 registry 用的 `actorId` 主鍵——
+ * 兩者目前是各自獨立建立的 demo 資料（`workflowStore.DEMO_ACTORS.Supplier.orgId` 跟
+ * `IDENTITY_REGISTRY['actor-supplier-steel-01'].orgId` 剛好都是 `ORG-TW-STEEL-SUPPLIER`，
+ * 但這是巧合對齊，不是程式碼保證的關聯）。這個函式做反查，讓呼叫端可以用 orgId 找到
+ * 對應的 actorId 再呼叫 verifyIdentityContext()。找不到就回 null，呼叫端要當成
+ * 「這個組織沒有 vLEI 身份」處理，不能默默略過身份檢查。
+ */
+function findActorIdByOrgId(orgId) {
+  const entry = Object.entries(IDENTITY_REGISTRY).find(([, record]) => record.orgId === orgId);
+  return entry ? entry[0] : null;
+}
+
+/**
  * @param {object} identityContext - canonical IdentityContext（呼叫端宣稱值）
  * @param {object} [options]
  * @param {Date} [options.now]
@@ -239,6 +253,7 @@ module.exports = {
   GATE_DECISION,
   IDENTITY_REGISTRY,
   getIdentityRecord,
+  findActorIdByOrgId,
   verifyIdentityContext,
   getSigningKeyPair,
 };

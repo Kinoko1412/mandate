@@ -293,6 +293,33 @@ h3 {
   background: #f1f5f9;
 }
 
+#register-vault-device[data-confirming="true"] {
+  border-color: var(--warn);
+  color: var(--warn);
+  font-weight: 700;
+}
+
+.status-badge[data-status="registered"] {
+  border-color: var(--ok);
+  color: var(--ok);
+  transition: color 200ms ease, border-color 200ms ease;
+}
+
+.status-badge[data-status="unregistered"] {
+  border-color: var(--line-strong);
+  color: var(--ink-muted);
+  background: var(--bg-inset);
+  transition: color 200ms ease, border-color 200ms ease;
+}
+
+#opened-evidence-vault-status[data-status="encrypted"] {
+  color: var(--ok);
+}
+
+#opened-evidence-vault-status[data-status="plaintext"] {
+  color: var(--warn);
+}
+
 .status-badge[data-status="BLOCKED"] {
   border-color: var(--deny);
   color: var(--deny);

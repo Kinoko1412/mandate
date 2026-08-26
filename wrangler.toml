@@ -37,3 +37,11 @@ fallthrough = true
 
 [observability]
 enabled = true
+
+# 這個帳號底下的 `mandate` worker 之前某次部署留下一個叫 MandateState 的 Durable Object
+# class（跟現在這份程式碼完全無關，現在的架構沒有用到任何 Durable Object），Cloudflare
+# 不會讓「原本宣告過的 class 消失」的部署直接通過（怕誤刪還在用的 stateful 資料），
+# 要明確用 migration 宣告「這個 class 真的要刪掉」才放行。這裡就是那個宣告。
+[[migrations]]
+tag = "cleanup-mandate-state-2026-08-26"
+deleted_classes = ["MandateState"]

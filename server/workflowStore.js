@@ -284,6 +284,8 @@ function appendAudit(partial) {
     ...(partial.counts ? { counts: clone(partial.counts) } : {}),
     ...(partial.reasonCodes ? { reasonCodes: clone(partial.reasonCodes) } : {}),
     ...(partial.scenario ? { scenario: partial.scenario } : {}),
+    ...(partial.usedFallback !== undefined ? { usedFallback: partial.usedFallback } : {}),
+    ...(partial.fallbackReason ? { fallbackReason: partial.fallbackReason } : {}),
     demoOnly: true,
   };
   state.audit.push(event);

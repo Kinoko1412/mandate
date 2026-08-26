@@ -127,6 +127,7 @@
       <div class="two-column">
         <section class="panel" aria-labelledby="upload-title">
           <h3 id="upload-title">新增 Demo evidence</h3>
+          <p id="upload-vault-status" class="privacy-note"></p>
           <form id="evidence-form">
             <label for="evidence-filename">檔名</label>
             <input id="evidence-filename" name="filename" maxlength="128" value="demo-evidence.txt" required>
@@ -254,6 +255,12 @@
           <div id="verifier-evidence" class="table-wrap" aria-live="polite"></div>
         </section>
         <section class="panel vault-open-panel">
+          <h3>Vault 裝置</h3>
+          <p class="privacy-note">金鑰只存在你的裝置裡，伺服器完全看不到。按下按鈕後瀏覽器會請你用 Face ID／指紋／Windows Hello 驗證一次，通常只需要幾秒鐘；如果改變主意，直接在系統跳出的驗證視窗按取消即可。</p>
+          <div class="button-row">
+            <output id="vault-key-status" class="status-badge" data-status="unregistered">● 尚未註冊</output>
+            <button id="register-vault-device" class="button secondary" type="button">註冊 Vault 裝置</button>
+          </div>
           <h3>使用有效 Grant 開啟指定底稿</h3>
           <p id="verifier-grant-state" class="muted">尚未取得本次 session 的 Grant。</p>
           <label for="verifier-evidence-select">指定 evidence</label>
@@ -266,6 +273,7 @@
           </div>
           <div id="opened-evidence" class="opened-evidence" hidden>
             <h4>受限內容（只在記憶體呈現）</h4>
+            <p id="opened-evidence-vault-status" class="muted" data-status="plaintext"></p>
             <pre id="opened-content"></pre>
             <button id="close-evidence" class="button secondary" type="button">關閉並清除</button>
           </div>
@@ -310,6 +318,8 @@
   <footer>
     Prototype 僅供 Hackathon 展示；不包含 ZKP、正式 Agent、Registry、HSM 或官方提交。
   </footer>
+  <script src="js/vault-crypto-core.js" defer></script>
+  <script src="js/vault-crypto.js" defer></script>
   <script src="js/case-workflow.js" defer></script>
 </body>
 </html>

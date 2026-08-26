@@ -8,6 +8,7 @@ const {
 } = require('./carbonAdapter');
 const trustAdapter = require('./trustAdapter');
 const agentAdapter = require('./agentAdapter');
+const vaultKeys = require('./vaultKeys');
 const { ROLES: DPP_ROLES, buildLayeredDisclosure } = require('../services/dpp');
 
 const MAX_EVIDENCE_BYTES = 512 * 1024;
@@ -114,6 +115,7 @@ function evidenceMetadata(item, includeVerifierFields = false) {
     humanConfirmed: item.humanConfirmed,
     mediaType: item.mediaType,
     sizeBytes: item.sizeBytes,
+    vaultEncrypted: !!item.vaultEncrypted,
   };
   if (includeVerifierFields) {
     result.filename = item.filename;
@@ -446,11 +448,17 @@ function audit(actor, action, targetType, targetId, result, reasonCode, caseId, 
   });
 }
 
-function analyzeCase(actor, caseId) {
+/**
+ * 2026-08-26 隊長裁示落地：預設走全面 LLM（`agentAdapter.analyzeCaseWithLlm`），LLM 呼叫
+ * 失敗／逾時／額度用完／格式錯誤都在 adapter 內部自動退回規則引擎，這裡完全不用另外處理
+ * fallback 邏輯——但要把 `usedFallback`/`fallbackReason` 老實記進 audit 跟回應本體，讓
+ * 「這次到底是不是真的用了 LLM」在稽核紀錄跟畫面上都看得到，不是悄悄降級沒人知道。
+ */
+async function analyzeCase(actor, caseId) {
   const scope = requireCase(actor, caseId, 'Supplier');
   if (scope.error) return scope.error;
   try {
-    const report = agentAdapter.analyzeCase(caseId);
+    const { report, usedFallback, fallbackReason } = await agentAdapter.analyzeCaseWithLlm(caseId);
     workflowStore.setRiskReport(caseId, report);
     const reasonCodes = [...new Set(report.findings.map((finding) => finding.reasonCode))];
     workflowStore.setServiceStatus('agent', {
@@ -478,10 +486,14 @@ function analyzeCase(actor, caseId) {
           discrepancies: report.discrepancies.length,
         },
         reasonCodes,
+        usedFallback,
+        ...(usedFallback ? { fallbackReason } : {}),
       }
     );
     return ok(200, {
       report,
+      usedFallback,
+      fallbackReason,
       service: workflowStore.getServices().agent,
       caseStatusUnchanged: scope.caseRecord.status,
       demoOnly: true,
@@ -566,6 +578,37 @@ function validateEvidenceInput(body) {
   return { filename, metadata };
 }
 
+/**
+ * 上傳內容的 Vault 加密欄位是選填的——沒帶就是舊有明碼行為（Verifier 還沒註冊 Vault 裝置
+ * 時，瀏覽器端會刻意不加密，直接送明碼），完全不影響既有測試/既有行為。帶了 vaultEncrypted:
+ * true 就必須把另外三個欄位一起帶齊，不能只帶一半——半殘的加密紀錄比完全不加密更危險
+ * （看起來像加密過、其實解不開或解出垃圾）。
+ */
+function validateVaultEncryptionFields(body) {
+  if (body.vaultEncrypted !== true) {
+    return { vaultEncrypted: false };
+  }
+  const ivOk = typeof body.vaultIvBase64 === 'string' && body.vaultIvBase64.trim();
+  const ephemeralOk =
+    body.vaultEphemeralPublicKeyJwk &&
+    typeof body.vaultEphemeralPublicKeyJwk === 'object' &&
+    !Array.isArray(body.vaultEphemeralPublicKeyJwk);
+  const keyIdOk = typeof body.vaultKeyId === 'string' && body.vaultKeyId.trim();
+  if (!ivOk || !ephemeralOk || !keyIdOk) {
+    throw new WorkflowAdapterError(
+      'INVALID_VAULT_ENCRYPTION_PAYLOAD',
+      'vaultEncrypted 為 true 時，vaultIvBase64／vaultEphemeralPublicKeyJwk／vaultKeyId 都是必填。',
+      null
+    );
+  }
+  return {
+    vaultEncrypted: true,
+    vaultIvBase64: body.vaultIvBase64,
+    vaultEphemeralPublicKeyJwk: body.vaultEphemeralPublicKeyJwk,
+    vaultKeyId: body.vaultKeyId,
+  };
+}
+
 async function createEvidence(actor, body) {
   const scope = requireCase(actor, body.caseId, 'Supplier');
   if (scope.error) return scope.error;
@@ -592,6 +635,7 @@ async function createEvidence(actor, body) {
     }
     const bytes = decodeBase64(body.contentBase64);
     const hash = `sha256:${await sha256Bytes(bytes)}`;
+    const vaultEncryption = validateVaultEncryptionFields(body);
     const evidence = workflowStore.addEvidence({
       caseId: body.caseId,
       type: metadata.type,
@@ -605,6 +649,7 @@ async function createEvidence(actor, body) {
       mediaType: body.mediaType,
       sizeBytes: bytes.byteLength,
       contentBase64: body.contentBase64,
+      ...vaultEncryption,
       demoOnly: true,
     });
     audit(actor, 'EVIDENCE_UPLOAD', 'evidence', evidence.evidenceId, 'ALLOW', null, body.caseId);
@@ -795,6 +840,79 @@ function revokeGrant(actor, grantId) {
   return ok(200, { grantId, revoked: true, revokedAt: revokedGrant.revokedAt });
 }
 
+/**
+ * Vault 加密金鑰註冊/查詢（WebAuthn PRF 版）。跟 accessVault() 的 Grant/token 機制是不同層次：
+ * 這裡管的是「Verifier 的 Vault 身份金鑰（公鑰/已包裝私鑰）長什麼樣子」，不判斷任何一次
+ * 存取許不許可——存取許可完全還是由 createGrant/accessVault 的既有機制把關，這一層不重複
+ * 判斷一次「這個人是不是 Verifier」，只負責金鑰資料本身的存取。
+ *
+ * GET 對任何已認證的 Demo 角色開放（Supplier 上傳前要讀公鑰去加密；Verifier 開底稿前要讀
+ * 自己的已包裝私鑰去解密），POST 只有 Verifier 能呼叫。
+ */
+function getVaultKeyStatus(actor) {
+  const record = vaultKeys.getVerifierKey();
+  if (!record) {
+    return ok(200, { registered: false, history: [] });
+  }
+  return ok(200, {
+    registered: true,
+    keyId: record.keyId,
+    credentialId: record.credentialId,
+    publicKeyJwk: record.publicKeyJwk,
+    wrappedPrivateKeyBase64: record.wrappedPrivateKeyBase64,
+    wrapIvBase64: record.wrapIvBase64,
+    prfSaltBase64: record.prfSaltBase64,
+    createdAt: record.createdAt,
+    history: vaultKeys.listVerifierKeyHistory(),
+    demoOnly: true,
+  });
+}
+
+/** 解密舊底稿要用「當時那把」金鑰，不是永遠用最新一把——輪替之後舊金鑰還在保留期限內
+ * 就查得到，超過 MAX_HISTORY 被淘汰的版本回 404，前端要把這個誠實顯示成「這把金鑰已經
+ * 超過保留期限」，不是裝作解密失敗是別的原因。*/
+function getVaultKeyByIdRoute(actor, keyId) {
+  const record = vaultKeys.getVerifierKeyById(keyId);
+  if (!record) {
+    return fail(404, 'VAULT_KEY_VERSION_NOT_FOUND', '此金鑰版本已超過保留期限或不存在，無法解密。');
+  }
+  return ok(200, {
+    registered: true,
+    keyId: record.keyId,
+    credentialId: record.credentialId,
+    publicKeyJwk: record.publicKeyJwk,
+    wrappedPrivateKeyBase64: record.wrappedPrivateKeyBase64,
+    wrapIvBase64: record.wrapIvBase64,
+    prfSaltBase64: record.prfSaltBase64,
+    createdAt: record.createdAt,
+    demoOnly: true,
+  });
+}
+
+function registerVaultKey(actor, body) {
+  if (actor.role !== 'Verifier') {
+    return fail(403, 'ROLE_FORBIDDEN', '只有 Verifier 能註冊/輪替 Vault 裝置金鑰。');
+  }
+  try {
+    const record = vaultKeys.addVerifierKey({
+      credentialId: body.credentialId,
+      publicKeyJwk: body.publicKeyJwk,
+      wrappedPrivateKeyBase64: body.wrappedPrivateKeyBase64,
+      wrapIvBase64: body.wrapIvBase64,
+      prfSaltBase64: body.prfSaltBase64,
+    });
+    audit(actor, 'VAULT_KEY_REGISTER', 'vault_key', record.keyId, 'ALLOW', null, workflowStore.DEMO_CASE_ID);
+    return ok(201, {
+      registered: true,
+      keyId: record.keyId,
+      createdAt: record.createdAt,
+      demoOnly: true,
+    });
+  } catch (error) {
+    return fail(400, 'INVALID_VAULT_KEY_PAYLOAD', error.message || 'Vault 金鑰註冊資料不完整。');
+  }
+}
+
 async function accessVault(actor, evidenceId, context, mode) {
   const action = mode === 'download' ? 'VAULT_DOWNLOAD' : 'VAULT_OPEN';
   const deny = (caseId, code) => {
@@ -839,6 +957,13 @@ async function accessVault(actor, evidenceId, context, mode) {
     evidence: {
       ...evidenceMetadata(item, true),
       contentBase64: item.contentBase64,
+      ...(item.vaultEncrypted
+        ? {
+            vaultIvBase64: item.vaultIvBase64,
+            vaultEphemeralPublicKeyJwk: item.vaultEphemeralPublicKeyJwk,
+            vaultKeyId: item.vaultKeyId,
+          }
+        : {}),
     },
     access: {
       mode,
@@ -1020,6 +1145,19 @@ async function handleWorkflowApi(method, pathname, body = {}, context = {}) {
   const findingMatch = pathname.match(/^\/api\/verifier\/cases\/([^/]+)\/findings$/);
   if (method === 'POST' && findingMatch) {
     return addFinding(actor, decodeURIComponent(findingMatch[1]), body);
+  }
+
+  if (method === 'GET' && pathname === '/api/vault/keys/verifier') {
+    return getVaultKeyStatus(actor);
+  }
+
+  if (method === 'POST' && pathname === '/api/vault/keys/verifier') {
+    return registerVaultKey(actor, body);
+  }
+
+  const vaultKeyVersionMatch = pathname.match(/^\/api\/vault\/keys\/verifier\/([^/]+)$/);
+  if (method === 'GET' && vaultKeyVersionMatch) {
+    return getVaultKeyByIdRoute(actor, decodeURIComponent(vaultKeyVersionMatch[1]));
   }
 
   if (method === 'POST' && pathname === '/api/vault/grants') {

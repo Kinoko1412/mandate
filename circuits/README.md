@@ -127,37 +127,57 @@ wasm 檔案要**兩種方式各 import 一次**：`.wasm`（給 patch 的比對�
 - 決定性：同樣輸入的電路輸出（total／compliant）每次一致；但 proof bytes 本身因為 Groth16
   的隨機 blinding factor 每次不同——這是協定本身該有的正常行為，不是 bug。
 
-## 架構決策：這一層是**疊加**在既有 context-binding 之上，不是取代（需要 A/B 一起確認是否要接進即時流程）
+## 架構決策：這一層是**疊加**在既有 context-binding 之上，不是取代——**2026-08-26 已接進即時流程**
 
 `services/proof/index.js` 既有的 context-binding／nonce／replay-protection（43 項測試，
 `caseId`／`policyVersion`／SHIP-A 套 SHIP-B 等）**完全沒有被這次的工作改動**，繼續維持原樣運作。
-這裡新增的 `services/proof/zk.js` 是**另外一層、可選的**加密證明能力，透過
-`generateRealZkProof()` / `verifyRealZkProof()` 獨立呼叫，兩層合起來才是完整故事：
+這裡的 `services/proof/zk.js` 是**另外一層**加密證明能力，兩層合起來才是完整故事：
 
 - context-binding 防「這份 proof 是不是被套到別的案件／批次／年度」。
 - zk 電路防「總數字是不是真的從私密分量正確加總出來、且落在合規區間」。
 
-**目前 `trustAdapter.js` 的即時流程（`generateShipmentProofEnvelopes`／`verifyProofEnvelope`）
-還沒有呼叫這一層**，原因是誠實的技術/產品判斷，不是做不到：
+**接線位置**：`server/trustAdapter.js` 的 `verifyRealZkForShipment()` + `evaluateTrustScenarioLive()`，
+只有正式 `productionEvaluator`（即時流程實際會走到的路徑，`/api/workflow/revalidate` 背後）
+會呼叫，用的正是本節原本建議的映射：`quantityScaled=[intensityScaled,0,0,0]`（私密）、
+`factorScaled=[quantityTonnesScaled,0,0,0]`（公開），`totalScaled` 輸出等於
+`allocatedEmissionsScaled`，跟 carbon-core 已經算出來的數字互相核對。
 
-1. 現有已實作的資料模型是「單一年度 intensity × 單一批次 quantity」的 case-level 分攤
-   （`allocatedEmissionsScaled = mulScaled(intensityScaled, quantityTonnesScaled)`），沒有
-   分解成電路命題假設的「多個製程階段分量」。要接上這一層，`quantityScaled` 4 個私密欄位
-   目前只有 1 個對得上真實業務數字（`intensityScaled`，本來就是唯一被 commitment 隱藏、
-   不直接揭露的欄位），其餘 3 個要嘛留 0（能跑但沒有實質揭露 3 個額外階段的意義）、要嘛需要
-   團隊決定要不要把「按製程階段分層揭露」正式排進資料模型——這是產品範圍決策，不是我能自己
-   拍板的事。
-2. 真實的 `fullProve()` 有真實的密碼學運算時間（非同步、但佔用 CPU），接進**每一次**
-   shipment 驗證的即時 API 路徑，對 Demo 現場的回應延遲有影響，值不值得、要不要只在特定
-   情境（例如查驗員主動要求）才觸發，也是需要 A（Demo 腳本、時間掌控）一起評估的事。
+**當初列出的兩個顧慮，實際落地後的處理方式**：
+1. 「4 個私密欄位只有 1 個對得上」——維持只用 1 個欄位（其餘留 0），沒有為了填滿而杜撰
+   額外的製程階段分層，這件事仍然是誠實的資料模型限制，不是假裝解決了。
+2. 「真實 fullProve 有運算時間，接進即時路徑會影響回應延遲」——**刻意不是每次都跑**：
+   `evaluateTrustScenarioLive()` 只在既有 commitment 層（`proof.verification===
+   'verified'`）已經通過之後才觸發真電路，commitment 層沒過就直接短路回傳，不多花時間；
+   而且只對設定了 `complianceThresholdScaled` 的政策版本（目前僅 `CBAM-STEEL-2026-v1`）
+   觸發，其餘政策版本這一步顯示 `skipped`，行為完全不變。
 
-**建議**（不是決定）：如果 A/B 決定要接進即時流程，最小改動路徑是在
-`expectedPublicInputs()`／`generateShipmentProofEnvelopes()` 旁邊新增一個明確標示「real zk」的
-選用分支，用 `quantityScaled=[intensityScaled,0,0,0]`／`factorScaled=[quantityTonnesScaled,0,0,0]`
-餵給現有電路（`totalScaled` 輸出會等於 `allocatedEmissionsScaled`，跟 carbon-core 已經算出來的
-數字一致，可以互相核對），`complianceThresholdScaled` 需要另外定義一個政策層級的合規上限
-（目前 Policy Profile 沒有這個欄位，要新增）。這條路徑技術上可行、已經被
-`tests/trust/zk.smoke.js` 間接證明過，只是還沒有實際接線。
+**刻意沒有動的地方**：`tests/trust/smoke.js` 直接同步呼叫的 `evaluateTrustScenario()`（40 幾項
+攻擊矩陣測試）簽章/行為完全沒改，新的 async 疊加層是另外包出來的 `evaluateTrustScenarioLive()`，
+只有 `productionEvaluator` 用——`runDemoAttackScenario()`（三個攻擊 demo 按鈕）也維持呼叫原本
+的同步版本，不會被真電路拖慢。
+
+**同一個疊加層後來也接了 vLEI 身份鏈驗證**（見下方 vLEI 段落），不是只有真電路——函式名稱
+從 `evaluateTrustScenarioWithRealZk` 改成 `evaluateTrustScenarioLive` 就是反映這件事。
+
+驗證：`tests/trust/live-extras.smoke.js`（`npm run smoke:trust-live-extras`），含真實 HTTP E2E
+（revalidate 到 READY_FOR_VERIFIER 時 `proof.checks` 真的含 `real_zk_proof` + `vlei_identity`
+pass）、totalScaled 對不起來的攻擊測試、沒設定門檻的政策版本正確 skip、commitment 層沒過時
+根本不跑真電路/查身份、身份不明或已撤銷時正確覆寫成 BLOCKED。跟 `tests/trust/smoke.js`
+（43 項，完全不受影響）一起跑全過。
+
+## vLEI 身份鏈驗證接進即時流程（2026-08-26）
+
+`services/identity`（vLEI 身份鏈驗證，Day 5 背景待辦①）原本是完全獨立、沒人呼叫的模組。
+現在案件的供應商組織（`caseRecord.supplierOrgId`）要在 vLEI Registry 裡有一條有效的身份鏈
+（法人憑證＋角色憑證，未撤銷未過期）才能判 GATE_OK，接線位置是
+`trustAdapter.verifyLiveIdentityForCase()`，跟真 ZK 電路同一層（`evaluateTrustScenarioLive()`）。
+
+**一個需要橋接的落差**：`services/identity` 的 registry 主鍵是 `actorId`（例如
+`actor-supplier-steel-01`），跟 workflow 層案件記錄用的 `supplierOrgId`
+（`ORG-TW-STEEL-SUPPLIER`）是各自獨立建立的 demo 資料，本來對不起來。新增
+`identity.findActorIdByOrgId()` 做反查橋接——目前示範案件的組織剛好在 registry 裡有對應的
+有效身份，所以 demo 案件維持能到 READY_FOR_VERIFIER；如果組織對不到任何 actorId，或對到的
+身份鏈已撤銷/過期，會誠實地讓案件 BLOCKED，不會默默放行。
 
 ## 已知限制（誠實列出，不是隱藏起來假裝沒有）
 

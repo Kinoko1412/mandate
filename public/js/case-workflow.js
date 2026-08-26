@@ -59,6 +59,14 @@ const ERROR_GUIDANCE = {
   INVALID_GRANT_EXPIRY: ['Grant 有效期不符限制。', '設定 10–290 秒後重建。'],
   GRANT_NOT_FOUND: ['找不到可撤銷的 Grant。', '重新建立短效 Grant。'],
   VAULT_ACCESS_DENIED: ['Vault Grant 無效或已失效。', '請 Supplier 重新建立綁定此 evidence 的短效 Grant。'],
+  WEBAUTHN_NOT_SUPPORTED: ['此瀏覽器/裝置不支援 Vault 生物辨識加密。', '換用較新版 Chrome/Edge/Safari，或使用有指紋/臉部辨識的裝置。'],
+  WEBAUTHN_PRF_UNSUPPORTED: ['裝置的驗證器不支援 PRF 擴充。', '換一個較新的裝置或瀏覽器再試一次。'],
+  WEBAUTHN_USER_CANCELLED: ['已取消裝置驗證。', '按「重試」再次觸發指紋/臉部辨識。'],
+  WEBAUTHN_FAILED: ['裝置驗證未完成。', '確認裝置的指紋/臉部辨識功能正常後再試一次。'],
+  WEBAUTHN_INVALID_DOMAIN: ['目前網址不支援 Vault 裝置驗證。', '改用 localhost（而非 127.0.0.1）或正式部署網域再試一次。'],
+  VAULT_KEY_NOT_REGISTERED: ['此裝置尚未註冊 Vault 金鑰，無法解密。', '請先點擊「註冊 Vault 裝置」。'],
+  INVALID_VAULT_KEY_PAYLOAD: ['Vault 金鑰註冊資料不完整。', '重新執行註冊流程。'],
+  INVALID_VAULT_ENCRYPTION_PAYLOAD: ['上傳的加密資料不完整。', '重新整理頁面後再次上傳。'],
   GRANT_INVALID: ['Grant 無效或已使用，底稿未開啟。', '請 Supplier 建立新的短效 Grant，再重試一次。'],
   GRANT_EXPIRED: ['Grant 已過期，底稿未開啟。', '請 Supplier 建立新的短效 Grant。'],
   GRANT_REVOKED: ['Grant 已撤銷，底稿未開啟。', '請 Supplier 建立新的短效 Grant。'],
@@ -177,6 +185,22 @@ async function runAction(action, successMessage) {
     return null;
   } finally {
     setBusy(false);
+  }
+}
+
+/**
+ * WebAuthn 提示框要等使用者真的去摸指紋/看鏡頭，比一般 API 呼叫慢得多——單靠
+ * runAction() 的通用忙碌狀態（游標變 progress、按鈕變灰）不夠明確，使用者容易懷疑
+ * 「是不是當機了」。這裡把觸發生物辨識的按鈕文字換成「請完成裝置驗證…」，動作結束
+ * 後（不管成功失敗）換回原文字。只給真的會跳出 WebAuthn 提示框的按鈕用。
+ */
+async function runActionWithDeviceVerification(button, action, successMessage) {
+  const originalText = button.textContent;
+  button.textContent = '請完成裝置驗證…';
+  try {
+    return await runAction(action, successMessage);
+  } finally {
+    button.textContent = originalText;
   }
 }
 
@@ -539,8 +563,12 @@ function renderImporter(payload) {
 
 function renderVerifier(caseRecord, indexPayload) {
   state.evidence = indexPayload.evidenceIndex || [];
+  // Vault 加密狀態放第二欄（ID 後面）而不是最後一欄——這張表在 .two-column 版面裡本來
+  // 就要橫向捲動才看得完，加密狀態對 Verifier 來說是判斷這份底稿可不可信的關鍵資訊，
+  // 放最後面等於要求使用者每次都捲到底才看得到，放前面才符合「一眼看到」的目的。
   const rows = state.evidence.map((item) => [
     item.evidenceId,
+    item.vaultEncrypted ? '🔒 已加密' : '⚠ 未加密',
     item.type,
     item.filename,
     `${item.coveredFrom} → ${item.coveredTo}`,
@@ -549,7 +577,7 @@ function renderVerifier(caseRecord, indexPayload) {
   ]);
   replaceChildren(
     $('verifier-evidence'),
-    [createTable(['ID', 'Type', 'Filename', 'Covered dates', 'Source', 'Confirm'], rows)]
+    [createTable(['ID', 'Vault', 'Type', 'Filename', 'Covered dates', 'Source', 'Confirm'], rows)]
   );
   fillEvidenceSelect(
     $('verifier-evidence-select'),
@@ -560,6 +588,66 @@ function renderVerifier(caseRecord, indexPayload) {
   renderVerifierGrantState();
   renderFindings(caseRecord.findings || []);
   renderRiskReport($('verifier-risk-report'), caseRecord.riskReport);
+}
+
+/**
+ * Supplier 端在上傳前就該知道這次上傳會不會被加密——原本這件事只有 Verifier 端事後
+ * 從 Evidence Index 的 Vault 欄位才看得到，Supplier 自己完全不知道，等於單向資訊落差。
+ */
+async function refreshUploadVaultStatus() {
+  const status = await VaultCrypto.getVaultKeyStatus('Supplier');
+  $('upload-vault-status').textContent = status.registered
+    ? '🔒 Verifier 已註冊 Vault 裝置，內容將自動以其裝置公鑰加密後上傳。'
+    : '⚠ Verifier 尚未註冊 Vault 裝置，內容將以現有方式上傳（未加密）。';
+}
+
+async function refreshVaultKeyStatus() {
+  const status = await VaultCrypto.getVaultKeyStatus('Verifier');
+  const badge = $('vault-key-status');
+  const button = $('register-vault-device');
+  if (status.registered) {
+    const historyNote = status.history.length > 1 ? `（含 ${status.history.length} 個歷史版本）` : '';
+    badge.textContent = `● 已註冊（${formatTime(status.createdAt)}）${historyNote}`;
+    badge.dataset.status = 'registered';
+    button.textContent = '輪替金鑰';
+  } else {
+    badge.textContent = '● 尚未註冊';
+    badge.dataset.status = 'unregistered';
+    button.textContent = '註冊 Vault 裝置';
+  }
+}
+
+let pendingRotateConfirm = false;
+
+/**
+ * 輪替金鑰是有實質後果的動作（見 vault-crypto.js／server/vaultKeys.js 的保留期限設計：
+ * 超過 MAX_HISTORY 筆的最舊版本會被真的淘汰，用那把金鑰加密的底稿之後就解不開了）——
+ * 不該一按就送出。這裡用「按第一次進入確認狀態、按鈕文字與提示變色、按第二次才真的送出」
+ * 的 inline 兩段式確認，不用 window.confirm()（那是原生瀏覽器對話框，跟這個 app 完全沒用過
+ * 原生對話框、一律用畫面內 notice/error 面板的既有風格不一致）。首次註冊不是破壞性動作，
+ * 不需要這道關卡。
+ */
+async function registerVaultDevice() {
+  const button = $('register-vault-device');
+  const alreadyRegistered = $('vault-key-status').dataset.status === 'registered';
+
+  if (alreadyRegistered && !pendingRotateConfirm) {
+    pendingRotateConfirm = true;
+    button.textContent = '確定要輪替嗎？再按一次確認';
+    button.dataset.confirming = 'true';
+    showNotice('輪替後新上傳的底稿會改用新金鑰版本加密；已加密的舊底稿在保留期限內仍可用當時的版本解密，但版本數超過上限時最舊的會被淘汰、屆時無法再解密。再按一次「確定要輪替嗎」才會真的送出。');
+    return null;
+  }
+  pendingRotateConfirm = false;
+  button.dataset.confirming = 'false';
+
+  const action = alreadyRegistered ? VaultCrypto.rotateVerifierVaultKey : VaultCrypto.registerVerifierVaultKey;
+  const message = alreadyRegistered
+    ? 'Vault 金鑰已輪替；之後上傳的底稿改用新版本加密，舊底稿仍可用當時的版本解密。'
+    : 'Vault 裝置註冊完成；之後上傳的底稿會自動以此裝置公鑰加密。';
+  const result = await runActionWithDeviceVerification(button, action, message);
+  if (result) await runAction(refreshVaultKeyStatus);
+  else button.textContent = alreadyRegistered ? '輪替金鑰' : '註冊 Vault 裝置'; // 失敗時把按鈕文字換回正常狀態，不留在「請完成裝置驗證…」
 }
 
 function renderVerifierGrantState() {
@@ -666,12 +754,14 @@ async function loadRole() {
 
   if (state.role === 'Supplier') {
     renderSupplier(detail.case);
+    await refreshUploadVaultStatus();
   } else if (state.role === 'Importer') {
     const summary = await api(`/api/importer/cases/${CASE_ID}/summary`);
     renderImporter(summary);
   } else {
     const index = await api(`/api/verifier/cases/${CASE_ID}/evidence`);
     renderVerifier(detail.case, index);
+    await refreshVaultKeyStatus();
   }
   await refreshAudit();
 }
@@ -703,6 +793,15 @@ async function refreshAudit() {
 }
 
 async function uploadEvidence(input) {
+  const plainBytes = VaultCryptoCore.utf8ToBytes(input.content);
+  let vaultFields = { contentBase64: utf8ToBase64(input.content), vaultEncrypted: false };
+  try {
+    const encrypted = await VaultCrypto.encryptForVault(plainBytes);
+    if (encrypted) vaultFields = encrypted;
+  } catch {
+    // Verifier 公鑰讀取失敗（例如網路問題）時退回明碼上傳，不擋 Supplier 的上傳動作——
+    // 這不是靜默隱藏加密失敗：畫面上的「⚠ 未加密」標記會如實反映這份底稿沒有被加密。
+  }
   return api('/api/evidence', {
     method: 'POST',
     role: 'Supplier',
@@ -710,13 +809,13 @@ async function uploadEvidence(input) {
       caseId: CASE_ID,
       filename: input.filename,
       mediaType: input.mediaType,
-      contentBase64: utf8ToBase64(input.content),
       metadata: {
         type: input.type,
         coveredFrom: input.coveredFrom,
         coveredTo: input.coveredTo,
         source: input.source,
       },
+      ...vaultFields,
     },
   });
 }
@@ -814,15 +913,19 @@ async function submitCase() {
 }
 
 async function analyzeCase() {
-  const result = await runAction(
-    () => api(`/api/cases/${CASE_ID}/agent/analyze`, {
-      method: 'POST',
-      role: 'Supplier',
-      body: {},
-    }),
-    'Evidence Agent 預審已完成；這是衍生風險報告，不參與 Gate。'
-  );
-  if (result) await runAction(loadRole);
+  const result = await runAction(() => api(`/api/cases/${CASE_ID}/agent/analyze`, {
+    method: 'POST',
+    role: 'Supplier',
+    body: {},
+  }));
+  if (result) {
+    showNotice(
+      result.usedFallback
+        ? `Evidence Agent 預審已完成（LLM 不可用，已退回規則引擎：${result.fallbackReason || '未知原因'}）；這是衍生風險報告，不參與 Gate。`
+        : 'Evidence Agent 預審已完成（LLM）；這是衍生風險報告，不參與 Gate。'
+    );
+    await runAction(loadRole);
+  }
   return result;
 }
 
@@ -1054,9 +1157,7 @@ function clearVaultSession() {
   renderVerifierGrantState();
 }
 
-function downloadBase64Evidence(evidence) {
-  const binary = atob(evidence.contentBase64);
-  const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+function downloadBytesEvidence(evidence, bytes) {
   const blob = new Blob([bytes], { type: evidence.mediaType || 'application/octet-stream' });
   const objectUrl = URL.createObjectURL(blob);
   const link = document.createElement('a');
@@ -1095,11 +1196,31 @@ async function accessEvidence(mode) {
     return;
   }
   clearVaultSession();
+  // 一次性 Grant 已經在伺服器端消耗掉了（上面的 api() 呼叫已經拿到內容），這裡的解密
+  // 失敗不該讓底稿「消失」——runAction() 會把 WebAuthn/解密錯誤顯示出來，不是留白裝沒事。
+  // 只有 vaultEncrypted 的底稿才會真的觸發 WebAuthn 提示框，明碼底稿走 decryptFromVault()
+  // 的快速路徑，不用特地換按鈕文字誤導使用者以為要等生物辨識。
+  const actionButton = $(mode === 'download' ? 'download-evidence' : 'open-evidence');
+  const plaintextBytes = result.evidence.vaultEncrypted
+    ? await runActionWithDeviceVerification(actionButton, () => VaultCrypto.decryptFromVault(result.evidence))
+    : await runAction(() => VaultCrypto.decryptFromVault(result.evidence));
+  if (!plaintextBytes) {
+    try {
+      await refreshAudit();
+    } catch {
+      // Preserve the actionable Vault error already shown to the user.
+    }
+    return;
+  }
   if (mode === 'download') {
-    downloadBase64Evidence(result.evidence);
+    downloadBytesEvidence(result.evidence, plaintextBytes);
     showNotice('指定底稿已下載一次；Grant 與 session token 已清除。');
   } else {
-    $('opened-content').textContent = base64ToUtf8(result.evidence.contentBase64);
+    $('opened-content').textContent = VaultCryptoCore.bytesToUtf8(plaintextBytes);
+    $('opened-evidence-vault-status').textContent = result.evidence.vaultEncrypted
+      ? '🔒 已加密（Vault PRF）'
+      : '⚠ 未加密（Verifier 當時尚未註冊裝置）';
+    $('opened-evidence-vault-status').dataset.status = result.evidence.vaultEncrypted ? 'encrypted' : 'plaintext';
     $('opened-evidence').hidden = false;
     showNotice('指定底稿已開啟一次；Grant 與 session token 已清除。這不代表正式查驗完成。');
   }
@@ -1168,6 +1289,7 @@ function bindEvents() {
   $('revoke-grant').addEventListener('click', revokeGrant);
   $('copy-token').addEventListener('click', copyToken);
   $('clear-token').addEventListener('click', clearToken);
+  $('register-vault-device').addEventListener('click', registerVaultDevice);
   $('open-evidence').addEventListener('click', openEvidence);
   $('download-evidence').addEventListener('click', downloadEvidence);
   $('close-evidence').addEventListener('click', closeEvidence);
