@@ -7,35 +7,120 @@
   <link rel="icon" href="data:image/svg+xml,%3Csvg viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%231f6f5f'/%3E%3Cpath d='M18 45V19h8l6 10 6-10h8v26h-8V31l-6 9-6-9v14z' fill='white'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="css/tokens.css">
   <link rel="stylesheet" href="css/case-workflow.css">
+  <link rel="stylesheet" href="css/evidence-workspace.css">
 </head>
 <body>
   <a class="skip-link" href="#workspace">跳到主要內容</a>
+  <button type="button" class="ew-settings-toggle" id="settings-toggle" aria-label="設定與角色切換" aria-expanded="false" aria-controls="settings-panel">
+    <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09a1.65 1.65 0 00-1-1.51 1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09a1.65 1.65 0 001.51-1 1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+  </button>
+  <div class="ew-settings-scrim" id="settings-scrim"></div>
+  <div class="ew-settings-panel" id="settings-panel" hidden>
+    <nav class="role-switcher ew-role-switcher" aria-label="切換角色視角">
+      <span>目前角色</span>
+      <button type="button" class="role-button" data-role="Supplier" aria-pressed="true">Supplier</button>
+      <button type="button" class="role-button" data-role="Importer" aria-pressed="false">Importer</button>
+      <button type="button" class="role-button" data-role="Verifier" aria-pressed="false">Verifier</button>
+      <span id="actor-summary" class="actor-summary" aria-live="polite">載入 Demo actor…</span>
+    </nav>
+    <a href="legacy.html" class="ew-ghost-pill">舊版 PCF 介面參考</a>
+  </div>
+
   <header class="site-header">
     <div>
-      <p class="eyebrow">Mandate · Day 4 Four-act Demo</p>
+      <p class="eyebrow">Mandate · Evidence Workspace</p>
       <h1>可信碳排證據 Agent</h1>
     </div>
-    <div class="header-actions">
-      <a href="legacy.html">舊版 PCF 介面參考</a>
+  </header>
+
+  <div class="dev-tools" id="dev-tools">
+    <button type="button" class="dev-tools-toggle" id="dev-tools-toggle" aria-expanded="false" aria-controls="dev-tools-panel">
+      <span class="dev-tools-chevron" aria-hidden="true"></span>
+      <span id="dev-tools-toggle-label">顯示測試/開發工具</span>
+    </button>
+    <div class="dev-tools-panel" id="dev-tools-panel" hidden>
       <div class="reset-control">
         <button id="reset-workflow" class="button secondary" type="button" aria-describedby="reset-help">重置 Demo</button>
         <span id="reset-help" class="control-help">僅 Supplier 可重置 Demo。</span>
       </div>
+
+      <section class="case-hero" aria-labelledby="case-title">
+        <div>
+          <p class="eyebrow">固定 Demo 案件 · CASE-2026-001</p>
+          <h2 id="case-title">案件載入中…</h2>
+          <p id="case-meta" class="muted">正在取得 server-side 遮罩資料。</p>
+          <p id="ready-disclaimer" class="ready-disclaimer">具備送交查驗準備條件，不代表正式查驗完成。</p>
+        </div>
+        <span id="case-status" class="status-badge" data-status="loading">LOADING</span>
+      </section>
+
+      <section class="service-strip" aria-labelledby="service-title">
+        <div>
+          <h2 id="service-title">依賴服務</h2>
+          <p>未接妥的模組一律顯示「尚未驗證」，不推定可送交。</p>
+        </div>
+        <div id="service-statuses" class="service-list" aria-live="polite">
+          <span class="service-chip">Agent：載入中</span>
+          <span class="service-chip">Proof：載入中</span>
+          <span class="service-chip">Gate：載入中</span>
+        </div>
+        <p class="commitment-note">Proof / Gate 的「已驗證」僅指 Demo SHA-256 commitment 與資料一致性檢查，非 zk-SNARK、非物理真實驗證。</p>
+      </section>
+
+      <section class="panel demo-console" aria-labelledby="demo-console-title">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Day 4 · Four-act Demo</p>
+            <h2 id="demo-console-title">四幕 Demo 控制台</h2>
+          </div>
+        </div>
+        <div class="act-grid">
+          <article class="act-card">
+            <h3>幕 1｜正常案件</h3>
+            <p>重置、載入四份 synthetic 文件、人工確認、提交、Agent 預審、Trust 重驗，一鍵走到 READY_FOR_VERIFIER。</p>
+            <button id="run-act-1" class="button" type="button">一鍵執行正常案件</button>
+          </article>
+          <article class="act-card">
+            <h3>幕 2｜最小揭露</h3>
+            <p>衍生 RiskReport 不是底稿；Importer 只看安全摘要，Verifier 必須使用一次性短效 token 才能開啟指定底稿。</p>
+            <div class="button-row">
+              <button id="run-act-2" class="button" type="button">建立 Grant 並看 Importer 摘要</button>
+              <button id="open-act-2-verifier" class="button secondary" type="button">切 Verifier 並開底稿一次</button>
+            </div>
+          </article>
+          <article class="act-card">
+            <h3>幕 3｜攻擊攔截</h3>
+            <p>三個按鈕都呼叫 server-side Trust Engine；結果不會修改正常案件。</p>
+            <div class="button-row attack-actions">
+              <button class="button danger attack-button" data-scenario="tampered_quantity" type="button">竄改 quantity</button>
+              <button class="button danger attack-button" data-scenario="wrong_factor" type="button">錯誤 factor</button>
+              <button class="button danger attack-button" data-scenario="proof_context_swap" type="button">SHIP-A Proof 套 SHIP-B</button>
+            </div>
+            <div id="attack-result" class="demo-result" role="status" aria-live="polite">尚未執行攻擊情境。</div>
+          </article>
+          <article class="act-card">
+            <h3>幕 4｜誠實邊界</h3>
+            <p>文件數字一致不代表現場儀表正常或已校正。Commitment / Gate 只驗資料一致性，不證明物理真實。</p>
+            <button id="run-act-4" class="button secondary" type="button">展示物理真實邊界</button>
+            <div id="physical-result" class="demo-result" role="status" aria-live="polite">尚未執行物理邊界情境。</div>
+          </article>
+        </div>
+      </section>
+
+      <section class="panel audit-panel" aria-labelledby="audit-title">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">Server-masked activity</p>
+            <h2 id="audit-title">Audit Timeline</h2>
+          </div>
+          <button id="refresh-audit" class="button secondary" type="button">重新整理</button>
+        </div>
+        <ol id="audit-timeline" class="timeline" aria-live="polite">
+          <li class="empty-state">尚無 Audit 事件。</li>
+        </ol>
+      </section>
     </div>
-  </header>
-
-  <div class="truth-banner" role="note">
-    <strong>Demo role，不是真實認證。</strong>
-    READY_FOR_VERIFIER 只代表具備送交查驗準備條件，不代表正式查驗完成或官方核准。
   </div>
-
-  <nav class="role-switcher" aria-label="切換 Demo 角色">
-    <span>目前角色</span>
-    <button type="button" class="role-button" data-role="Supplier" aria-pressed="true">Supplier</button>
-    <button type="button" class="role-button" data-role="Importer" aria-pressed="false">Importer</button>
-    <button type="button" class="role-button" data-role="Verifier" aria-pressed="false">Verifier</button>
-    <span id="actor-summary" class="actor-summary" aria-live="polite">載入 Demo actor…</span>
-  </nav>
 
   <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
   <div id="error-panel" class="error-panel" role="alert" tabindex="-1" hidden>
@@ -46,88 +131,76 @@
   </div>
 
   <main id="workspace" class="workspace">
-    <section class="case-hero" aria-labelledby="case-title">
-      <div>
-        <p class="eyebrow">固定 Demo 案件 · CASE-2026-001</p>
-        <h2 id="case-title">案件載入中…</h2>
-        <p id="case-meta" class="muted">正在取得 server-side 遮罩資料。</p>
-        <p id="ready-disclaimer" class="ready-disclaimer">具備送交查驗準備條件，不代表正式查驗完成。</p>
-      </div>
-      <span id="case-status" class="status-badge" data-status="loading">LOADING</span>
-    </section>
-
-    <section class="service-strip" aria-labelledby="service-title">
-      <div>
-        <h2 id="service-title">依賴服務</h2>
-        <p>未接妥的模組一律顯示「尚未驗證」，不推定可送交。</p>
-      </div>
-      <div id="service-statuses" class="service-list" aria-live="polite">
-        <span class="service-chip">Agent：載入中</span>
-        <span class="service-chip">Proof：載入中</span>
-        <span class="service-chip">Gate：載入中</span>
-      </div>
-      <p class="commitment-note">Proof / Gate 的「已驗證」僅指 Demo SHA-256 commitment 與資料一致性檢查，非 zk-SNARK、非物理真實驗證。</p>
-    </section>
-
-    <section class="panel demo-console" aria-labelledby="demo-console-title">
-      <div class="section-heading">
-        <div>
-          <p class="eyebrow">Day 4 · Four-act Demo</p>
-          <h2 id="demo-console-title">四幕 Demo 控制台</h2>
-        </div>
-      </div>
-      <div class="act-grid">
-        <article class="act-card">
-          <h3>幕 1｜正常案件</h3>
-          <p>重置、載入四份 synthetic 文件、人工確認、提交、Agent 預審、Trust 重驗，一鍵走到 READY_FOR_VERIFIER。</p>
-          <button id="run-act-1" class="button" type="button">一鍵執行正常案件</button>
-        </article>
-        <article class="act-card">
-          <h3>幕 2｜最小揭露</h3>
-          <p>衍生 RiskReport 不是底稿；Importer 只看安全摘要，Verifier 必須使用一次性短效 token 才能開啟指定底稿。</p>
-          <div class="button-row">
-            <button id="run-act-2" class="button" type="button">建立 Grant 並看 Importer 摘要</button>
-            <button id="open-act-2-verifier" class="button secondary" type="button">切 Verifier 並開底稿一次</button>
-          </div>
-        </article>
-        <article class="act-card">
-          <h3>幕 3｜攻擊攔截</h3>
-          <p>三個按鈕都呼叫 server-side Trust Engine；結果不會修改正常案件。</p>
-          <div class="button-row attack-actions">
-            <button class="button danger attack-button" data-scenario="tampered_quantity" type="button">竄改 quantity</button>
-            <button class="button danger attack-button" data-scenario="wrong_factor" type="button">錯誤 factor</button>
-            <button class="button danger attack-button" data-scenario="proof_context_swap" type="button">SHIP-A Proof 套 SHIP-B</button>
-          </div>
-          <div id="attack-result" class="demo-result" role="status" aria-live="polite">尚未執行攻擊情境。</div>
-        </article>
-        <article class="act-card">
-          <h3>幕 4｜誠實邊界</h3>
-          <p>文件數字一致不代表現場儀表正常或已校正。Commitment / Gate 只驗資料一致性，不證明物理真實。</p>
-          <button id="run-act-4" class="button secondary" type="button">展示物理真實邊界</button>
-          <div id="physical-result" class="demo-result" role="status" aria-live="polite">尚未執行物理邊界情境。</div>
-        </article>
-      </div>
-    </section>
-
     <section id="supplier-view" class="role-view" data-view="Supplier" aria-labelledby="supplier-title">
-      <div class="section-heading">
-        <div>
-          <p class="eyebrow">Supplier Workspace</p>
-          <h2 id="supplier-title">年度底稿與證據準備</h2>
-        </div>
-        <div class="button-row">
-          <button id="seed-evidence" class="button secondary" type="button">載入四份 synthetic Demo evidence</button>
-          <button id="run-agent-analysis" class="button" type="button">執行 Evidence Agent 預審</button>
-          <button id="revalidate-trust" class="button" type="button">重驗 Proof / Gate</button>
+      <button type="button" class="ew-drawer-toggle" id="evidence-drawer-toggle" aria-label="展開已上傳文件" aria-expanded="false">
+        <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7h13M3 12h13M3 17h9"/><circle cx="20" cy="15" r="2.6"/></svg>
+        <span class="ew-drawer-badge" id="evidence-drawer-count">0</span>
+      </button>
+      <div class="ew-drawer-scrim" id="evidence-drawer-scrim"></div>
+      <aside class="ew-drawer" id="evidence-drawer" aria-hidden="true" aria-label="已上傳的 evidence 文件">
+        <div class="ew-drawer-head">已上傳文件</div>
+        <div class="ew-file-list" id="evidence-drawer-list"></div>
+      </aside>
+      <div class="ew-toast-stack" id="toast-stack" aria-live="polite"></div>
+
+      <div class="ew-op-wrap">
+      <div class="ew-view-toggle-row">
+        <p class="eyebrow ew-hero-eyebrow">Supplier Workspace</p>
+        <div class="ew-view-toggle" role="group" aria-label="切換視角">
+          <span class="ew-view-toggle-lbl">一般 Agent</span>
+          <button type="button" class="ew-switch" id="exec-view-switch" role="switch" aria-checked="false" aria-label="切換到決策者總覽">
+            <span class="ew-switch-knob"></span>
+          </button>
+          <span class="ew-view-toggle-lbl">決策者總覽</span>
         </div>
       </div>
 
-      <div id="installation-cards" class="metric-grid" aria-live="polite"></div>
+      <div id="agent-view">
+      <div class="ew-hero" aria-labelledby="chat-upload-title">
+        <h2 id="chat-upload-title" class="ew-hero-title">上傳文件，讓 AI 幫你讀取</h2>
+        <p class="ew-hero-sub">附加電費單、燃料紀錄、產量表、前驅物清單，或直接問我案件目前的狀況。</p>
 
-      <div class="two-column">
+        <div class="ew-chat-thread" id="chat-thread" aria-live="polite"></div>
+
+        <div class="ew-chat-composer ew-hero-composer">
+          <div class="ew-chat-input-row">
+            <button type="button" class="ew-chat-attach" id="chat-attach-btn" aria-label="附加圖片檔案">
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.44 11.05l-9.19 9.19a5 5 0 01-7.07-7.07l9.19-9.19a3.5 3.5 0 015 5l-9.2 9.19a2 2 0 01-2.82-2.83l8.49-8.48"/></svg>
+            </button>
+            <input type="file" id="chat-file-input" accept="image/png,image/jpeg,application/pdf" hidden>
+            <textarea id="chat-text-input" rows="1" placeholder="附加檔案，或直接問我問題…"></textarea>
+            <button type="button" class="button" id="chat-send-btn">送出</button>
+          </div>
+          <div class="ew-chat-file-chip" id="chat-file-chip" hidden>
+            <span id="chat-file-name"></span>
+            <button type="button" id="chat-file-clear" aria-label="移除附加檔案">✕</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="ew-hstepper-head">
+        <span class="ew-hstepper-lbl">必要文件</span>
+        <span class="ew-hstepper-count" id="required-stepper-count">0 / 4</span>
+      </div>
+      <div class="ew-hstepper" id="required-stepper"></div>
+
+      <section class="panel ew-index-panel" aria-labelledby="supplier-index-title">
+        <div class="panel-heading">
+          <h3 id="supplier-index-title">Evidence Index</h3>
+          <button id="confirm-all" class="button secondary" type="button">人工確認全部</button>
+        </div>
+        <div id="supplier-evidence" class="table-wrap" aria-live="polite"></div>
+        <button id="submit-case" class="button" type="button">提交年度資料</button>
+      </section>
+
+      <button type="button" class="dev-tools-toggle" id="manual-form-toggle" aria-expanded="false">
+        <span class="dev-tools-chevron" aria-hidden="true"></span>
+        <span id="manual-form-toggle-label">顯示手動輸入表單</span>
+      </button>
+      <div class="dev-tools-panel" id="manual-form-panel" hidden>
         <section class="panel" aria-labelledby="upload-title">
-          <h3 id="upload-title">新增 Demo evidence</h3>
-          <p id="upload-vault-status" class="privacy-note"></p>
+          <h3 id="upload-title">新增 Demo evidence（手動輸入）</h3>
+          <p class="privacy-note">AI 讀不出來、或內容是 PDF 時的備援：手動填欄位直接送出，不經過 AI 擷取。</p>
           <form id="evidence-form">
             <label for="evidence-filename">檔名</label>
             <input id="evidence-filename" name="filename" maxlength="128" value="demo-evidence.txt" required>
@@ -166,47 +239,62 @@
             <button class="button" type="submit">上傳並計算 SHA-256</button>
           </form>
         </section>
-
-        <section class="panel" aria-labelledby="supplier-index-title">
-          <div class="panel-heading">
-            <h3 id="supplier-index-title">Evidence Index</h3>
-            <button id="confirm-all" class="button secondary" type="button">人工確認全部</button>
-          </div>
-          <div id="supplier-evidence" class="table-wrap" aria-live="polite"></div>
-          <button id="submit-case" class="button" type="button">提交年度資料</button>
-        </section>
       </div>
 
-      <section class="panel risk-panel" aria-labelledby="supplier-risk-title">
-        <h3 id="supplier-risk-title">Evidence Agent RiskReport</h3>
-        <p class="privacy-note">衍生風險報告，不是底稿；預審不參與 Gate，也不代表 Agent 完成任何驗證。</p>
-        <div id="supplier-risk-report" aria-live="polite"></div>
-      </section>
+      <button type="button" class="dev-tools-toggle" id="supplier-tools-toggle" aria-expanded="false">
+        <span class="dev-tools-chevron" aria-hidden="true"></span>
+        <span id="supplier-tools-toggle-label">顯示案件資訊與進階工具</span>
+      </button>
+      <div class="dev-tools-panel" id="supplier-tools-panel" hidden>
+        <div class="button-row">
+          <button id="seed-evidence" class="button secondary" type="button">載入四份 synthetic Demo evidence</button>
+          <button id="run-agent-analysis" class="button" type="button">執行 Evidence Agent 預審</button>
+          <button id="revalidate-trust" class="button" type="button">重驗 Proof / Gate</button>
+        </div>
 
-      <section class="panel grant-panel" aria-labelledby="grant-title">
-        <div>
-          <h3 id="grant-title">為 Demo Verifier 建立一次性短效 Grant</h3>
-          <p>最多 5 分鐘；token 僅顯示一次，不會放入 Audit Timeline。</p>
-        </div>
-        <div class="field">
-          <label for="grant-evidence">指定 evidence</label>
-          <select id="grant-evidence"></select>
-        </div>
-        <div class="field">
-          <label for="grant-seconds">有效秒數</label>
-          <input id="grant-seconds" type="number" min="10" max="290" value="120">
-        </div>
-        <button id="create-grant" class="button" type="button">建立 Grant</button>
-        <div id="token-once" class="token-once" hidden>
-          <p><strong>只顯示一次：</strong><span id="grant-expiry"></span></p>
-          <output id="grant-token" aria-label="一次性 Vault token"></output>
-          <div class="button-row">
-            <button id="copy-token" class="button secondary" type="button">複製 token</button>
-            <button id="revoke-grant" class="button danger" type="button">撤銷 Grant</button>
-            <button id="clear-token" class="button danger" type="button">清除 token</button>
+        <div id="installation-cards" class="metric-grid" aria-live="polite"></div>
+
+        <section class="panel risk-panel" aria-labelledby="supplier-risk-title">
+          <h3 id="supplier-risk-title">Evidence Agent RiskReport</h3>
+          <p class="privacy-note">衍生風險報告，不是底稿；預審不參與 Gate，也不代表 Agent 完成任何驗證。</p>
+          <div id="supplier-risk-report" aria-live="polite"></div>
+        </section>
+
+        <section class="panel grant-panel" aria-labelledby="grant-title">
+          <div>
+            <h3 id="grant-title">為 Demo Verifier 建立一次性短效 Grant</h3>
+            <p>最多 5 分鐘；token 僅顯示一次，不會放入 Audit Timeline。</p>
           </div>
-        </div>
-      </section>
+          <div class="field">
+            <label for="grant-evidence">指定 evidence</label>
+            <select id="grant-evidence"></select>
+          </div>
+          <div class="field">
+            <label for="grant-seconds">有效秒數</label>
+            <input id="grant-seconds" type="number" min="10" max="290" value="120">
+          </div>
+          <button id="create-grant" class="button" type="button">建立 Grant</button>
+          <div id="token-once" class="token-once" hidden>
+            <p><strong>只顯示一次：</strong><span id="grant-expiry"></span></p>
+            <output id="grant-token" aria-label="一次性 Vault token"></output>
+            <div class="button-row">
+              <button id="copy-token" class="button secondary" type="button">複製 token</button>
+              <button id="revoke-grant" class="button danger" type="button">撤銷 Grant</button>
+              <button id="clear-token" class="button danger" type="button">清除 token</button>
+            </div>
+          </div>
+        </section>
+      </div>
+      </div>
+
+      </div>
+
+      <div id="exec-overview" class="ew-exec-wrap" hidden>
+        <h2 class="ew-exec-title">案件總覽</h2>
+        <p class="ew-exec-sub">依出貨批次檢視查驗準備進度——來自這個 Demo 案件的真實資料，不是示範用假資料。</p>
+        <div class="ew-exec-summary" id="exec-summary"></div>
+        <div class="ew-exec-grid" id="exec-grid"></div>
+      </div>
     </section>
 
     <section id="importer-view" class="role-view" data-view="Importer" aria-labelledby="importer-title" hidden>
@@ -299,19 +387,6 @@
         </form>
         <div id="finding-list" aria-live="polite"></div>
       </section>
-    </section>
-
-    <section class="panel audit-panel" aria-labelledby="audit-title">
-      <div class="panel-heading">
-        <div>
-          <p class="eyebrow">Server-masked activity</p>
-          <h2 id="audit-title">Audit Timeline</h2>
-        </div>
-        <button id="refresh-audit" class="button secondary" type="button">重新整理</button>
-      </div>
-      <ol id="audit-timeline" class="timeline" aria-live="polite">
-        <li class="empty-state">尚無 Audit 事件。</li>
-      </ol>
     </section>
   </main>
 

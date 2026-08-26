@@ -29,10 +29,12 @@
 使用者要親自問「你有推到 cloudflare 正式網域嗎」才發現根本沒推——這造成了「以為完成了、
 其實只在本機」的誤解，這條規則就是要避免這件事重演。
 
-兩個 Cloudflare 帳號要分清楚：使用者自己的（`david460525@gmail.com`，部署到自己帳號下的
-`mandate.<subdomain>.workers.dev`）跟隊友 A 的正式帳號（`mandate.1qaz0726.workers.dev`，
-GitHub `1qaz0726-star`）。**預設部署到使用者自己的帳號，除非明確被要求才碰 A 的正式網域**
-（那是團隊共用的正式展示網址）。
+兩個 Cloudflare 帳號要分清楚：使用者自己的（`david460525@gmail.com`，workers.dev 子網域是
+`david460525`，所以 `wrangler.toml` 裡 `name = "mandate"` 部署出來就是
+`mandate.david460525.workers.dev`）跟隊友 A 的正式帳號（`mandate.1qaz0726.workers.dev`，
+GitHub `1qaz0726-star`）。**預設部署到使用者自己的帳號（`mandate.david460525.workers.dev`），
+除非明確被要求才碰 A 的正式網域**（那是團隊共用的正式展示網址）。使用者已於 2026-08-26
+再次明確確認這個網址就是預設部署目標。
 
 ## 已知歷史問題
 

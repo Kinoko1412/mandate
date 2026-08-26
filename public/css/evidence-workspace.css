@@ -1,0 +1,570 @@
+/*
+ * Evidence Workspace — scoped styles for three additive Supplier-Workspace
+ * components (history drawer, required-document stepper, upload toasts).
+ * Kept in its own file, loaded after case-workflow.css, so the existing
+ * "industrial console" page chrome and its static-contract test stay
+ * untouched. Every selector is ew- prefixed to avoid colliding with
+ * case-workflow.css class names, and colors/spacing reuse the real tokens
+ * from tokens.css (var(--brand), var(--alert), var(--line), ...) rather than
+ * introducing a second palette, so these read as native to the page instead
+ * of a foreign graft.
+ */
+
+/* ---- dev-tools disclosure: collapses the four-act console, role switcher,
+   case-hero/service-strip and audit timeline behind one understated toggle,
+   so first paint is just the clean evidence-upload flow. Nothing removed
+   from the DOM, only hidden — content and event bindings are unchanged. ---- */
+.dev-tools {
+  width: min(1180px, calc(100% - 32px));
+  margin-inline: auto;
+  margin-bottom: var(--space-4);
+}
+@media (max-width: 640px) {
+  .dev-tools { width: min(100% - 16px, 1180px); }
+}
+.dev-tools-toggle {
+  display: inline-flex; align-items: center; gap: var(--space-2);
+  border: none; background: none; padding: var(--space-1) 0;
+  font-size: 12.5px; color: var(--ink-muted); cursor: pointer;
+  transition: color var(--ease);
+}
+.dev-tools-toggle:hover { color: var(--ink); }
+.dev-tools-chevron {
+  display: inline-block; width: 8px; height: 8px;
+  border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor;
+  transform: rotate(45deg); transition: transform var(--ease);
+}
+.dev-tools-toggle.open .dev-tools-chevron { transform: rotate(-135deg); }
+.dev-tools-panel {
+  display: flex; flex-direction: column; gap: var(--space-4);
+  margin-top: var(--space-3);
+}
+.dev-tools-panel[hidden] { display: none; }
+.dev-tools-panel > .role-switcher,
+.dev-tools-panel > .reset-control { margin: 0; }
+
+/* ---- Supplier view: strip the boxed-console look so first paint reads as
+   a plain upload flow, not another technical panel. Scoped to #supplier-view
+   only — .role-view / .panel stay untouched for Importer/Verifier and the
+   rest of the app. ---- */
+#supplier-view {
+  border: none;
+  background: transparent;
+  padding: clamp(8px, 2vw, 16px) 0 clamp(16px, 3vw, 28px);
+}
+.ew-op-wrap {
+  max-width: 760px;
+  margin-inline: auto;
+}
+.ew-op-wrap > .ew-index-panel {
+  margin-bottom: var(--space-4);
+}
+
+/* ---- hero: the upload composer is the page's one focal element (Claude/
+   Gemini-homepage pattern) — centered, generous whitespace, no boxed panel
+   competing with it above the fold. ---- */
+.ew-hero-eyebrow {
+  text-align: center;
+}
+.ew-hero {
+  padding: clamp(20px, 6vh, 56px) 0 clamp(20px, 4vh, 32px);
+  text-align: center;
+}
+.ew-hero-title {
+  margin: 0;
+  font-size: clamp(22px, 4vw, 30px);
+  text-wrap: balance;
+}
+.ew-hero-sub {
+  margin: 10px 0 0;
+  color: var(--ink-muted);
+  font-size: 14px;
+}
+.ew-hero .ew-chat-thread {
+  text-align: left;
+}
+.ew-index-panel {
+  border: none;
+  background: transparent;
+  padding: 0;
+}
+#manual-form-toggle,
+#supplier-tools-toggle {
+  margin: var(--space-3) 0 0;
+}
+#manual-form-panel {
+  margin-bottom: var(--space-4);
+}
+
+/* ---- chat-style upload ---- */
+.ew-chat-thread {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 14px 0;
+  max-height: 360px;
+  overflow-y: auto;
+}
+.ew-chat-bubble {
+  max-width: 88%;
+  padding: 10px 14px;
+  border-radius: 12px;
+  font-size: 13.5px;
+  line-height: 1.55;
+}
+.ew-chat-bubble p { margin: 0; }
+.ew-chat-bubble.user {
+  align-self: flex-end;
+  background: var(--brand);
+  color: #fff;
+  border-bottom-right-radius: 3px;
+}
+.ew-chat-bubble.ai {
+  align-self: flex-start;
+  background: var(--bg-inset);
+  color: var(--ink);
+  border-bottom-left-radius: 3px;
+}
+.ew-chat-ai-head {
+  margin: 0 0 6px;
+  font-weight: 600;
+}
+.ew-chat-entries {
+  list-style: none;
+  margin: 0 0 10px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ew-chat-entries li {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-family: var(--font-body);
+}
+.ew-chat-entries .k { color: var(--ink-muted); }
+.ew-chat-entries .v { font-weight: 700; }
+.ew-chat-entries .c { font-size: 11.5px; color: var(--ink-muted); margin-left: auto; }
+.ew-chat-ai-actions {
+  display: flex;
+  gap: 10px;
+}
+/* Seamless pill composer — Claude/Gemini-homepage style: no border, no fill
+   distinct from the page beyond a soft shadow for depth, so it reads as
+   "resting on the page" rather than a boxed form panel. */
+.ew-chat-composer {
+  max-width: 640px;
+  margin: 0 auto;
+}
+.ew-chat-input-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--bg-elevated);
+  border-radius: 40px;
+  padding: 16px 16px 16px 26px;
+  box-shadow: 0 1px 2px rgba(26, 26, 24, 0.05), 0 10px 28px -14px rgba(26, 26, 24, 0.22);
+  transition: box-shadow var(--ease);
+}
+.ew-chat-input-row:focus-within {
+  box-shadow: 0 1px 2px rgba(26, 26, 24, 0.06), 0 16px 36px -14px rgba(26, 26, 24, 0.3);
+}
+.ew-chat-attach {
+  flex-shrink: 0;
+  width: 76px;
+  height: 76px;
+  border-radius: 999px;
+  border: none;
+  background: transparent;
+  color: var(--ink-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.ew-chat-attach:hover { color: var(--brand); background: var(--bg-inset); }
+.ew-chat-attach svg { width: 30px; height: 30px; stroke: currentColor; }
+.ew-chat-input-row textarea {
+  flex: 1;
+  resize: none;
+  min-height: 46px;
+  max-height: 220px;
+  padding: 18px 8px;
+  border: none;
+  background: transparent;
+  font-size: 22px;
+  color: var(--ink);
+}
+.ew-chat-input-row textarea:focus { outline: none; }
+#chat-send-btn {
+  flex-shrink: 0;
+  border-radius: 999px;
+  min-height: 76px;
+  padding: 0 34px;
+  font-size: 18px;
+}
+.ew-chat-file-chip[hidden] { display: none; }
+.ew-chat-file-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px auto 0;
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: var(--brand-wash);
+  font-size: 12.5px;
+  width: fit-content;
+}
+.ew-chat-file-chip button {
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: var(--ink-muted);
+}
+
+/* ---- header's legacy-UI link, restyled as a quiet ghost pill instead of a
+   bare underlined link — the one thing sitting top-right, so it should read
+   as a small control, not a stray inline link. ---- */
+.ew-ghost-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 14px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 12.5px;
+  color: var(--ink-muted);
+  text-decoration: none;
+  transition: color var(--ease), border-color var(--ease);
+}
+.ew-ghost-pill:hover { color: var(--ink); border-color: var(--line-strong); }
+
+/* ---- settings gear: consolidates role-switching + the legacy-UI link behind
+   one small popover, pinned top-left next to the evidence-history drawer icon,
+   so the page header stays down to just the title. ---- */
+.ew-settings-toggle {
+  position: fixed; top: 22px; left: 74px; z-index: 44;
+  width: 40px; height: 40px; border-radius: var(--radius-max);
+  border: 1px solid var(--line-strong); background: var(--bg-elevated); color: var(--ink-muted);
+  display: flex; align-items: center; justify-content: center; cursor: pointer;
+  box-shadow: 0 1px 2px rgba(26, 26, 24, 0.08), 0 6px 16px -6px rgba(26, 26, 24, 0.18);
+  transition: color var(--ease), border-color var(--ease), transform var(--ease);
+}
+.ew-settings-toggle:hover { color: var(--ink); border-color: var(--ink-faint); }
+.ew-settings-toggle.open { color: var(--brand); transform: rotate(30deg); }
+.ew-settings-toggle svg { width: 18px; height: 18px; stroke: currentColor; }
+.ew-settings-scrim {
+  position: fixed; inset: 0; background: rgba(26, 26, 24, 0.15);
+  opacity: 0; pointer-events: none; transition: opacity 200ms ease; z-index: 40;
+}
+.ew-settings-scrim.open { opacity: 1; pointer-events: auto; }
+.ew-settings-panel {
+  position: fixed; top: 70px; left: 22px; z-index: 45;
+  width: min(320px, calc(100vw - 44px));
+  overflow: hidden;
+  background: var(--bg-elevated); border: 1px solid var(--line); border-radius: var(--radius-max);
+  box-shadow: 0 12px 32px -10px rgba(26, 26, 24, 0.28);
+  padding: 16px;
+  display: flex; flex-direction: column; gap: 12px;
+}
+.ew-settings-panel[hidden] { display: none; }
+
+/* ---- Agent / decision-maker view toggle — a real switch, not a segmented
+   tab, matching the on/off metaphor the user asked for. ---- */
+.ew-view-toggle-row {
+  display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;
+}
+.ew-view-toggle { display: inline-flex; align-items: center; gap: 8px; }
+.ew-view-toggle-lbl { font-size: 12.5px; color: var(--ink-muted); }
+.ew-switch {
+  position: relative; width: 44px; height: 26px; border-radius: 999px; flex-shrink: 0;
+  border: 1px solid var(--line-strong); background: var(--bg-inset); cursor: pointer; padding: 0;
+  transition: background var(--ease), border-color var(--ease);
+}
+.ew-switch.on { background: var(--brand); border-color: var(--brand); }
+.ew-switch-knob {
+  position: absolute; top: 2px; left: 2px; width: 20px; height: 20px; border-radius: 999px;
+  background: #fff; box-shadow: 0 1px 2px rgba(26, 26, 24, 0.3);
+  transition: transform var(--ease);
+}
+.ew-switch.on .ew-switch-knob { transform: translateX(18px); }
+
+/* ---- decision-maker overview: real per-shipment cards, not mockup filler. ---- */
+.ew-exec-wrap {
+  width: min(1180px, calc(100% - 32px));
+  margin-inline: auto;
+}
+.ew-exec-title { margin: 8px 0 0; font-size: clamp(20px, 3.4vw, 26px); }
+.ew-exec-sub { margin: 6px 0 20px; color: var(--ink-muted); font-size: 13.5px; }
+.ew-exec-summary {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px;
+  background: var(--line); border: 1px solid var(--line); border-radius: var(--radius-max);
+  overflow: hidden; margin-bottom: 16px;
+}
+.ew-exec-metric {
+  background: #fff; padding: 16px 18px; display: flex; flex-direction: column; gap: 6px;
+}
+.ew-exec-metric strong { font-size: 26px; font-variant-numeric: tabular-nums; line-height: 1; }
+.ew-exec-metric span { font-size: 12px; color: var(--ink-muted); }
+.ew-exec-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px;
+}
+.ew-exec-card {
+  background: #fff; border: 1px solid var(--line); border-radius: var(--radius-max);
+  padding: 16px; display: flex; flex-direction: column; gap: 8px;
+}
+.ew-exec-card-top { display: flex; justify-content: space-between; }
+.ew-exec-card-id { font-size: 12px; color: var(--ink-muted); }
+.ew-exec-pill {
+  display: inline-block; width: fit-content; font-size: 11px; font-weight: 650;
+  padding: 3px 10px; border-radius: 999px;
+}
+.ew-exec-pill.ready { background: var(--brand-wash); color: var(--brand-deep); }
+.ew-exec-pill.review { background: #e3ecf7; color: #2a4d7a; }
+.ew-exec-pill.blocked { background: var(--alert-wash); color: var(--alert-deep); }
+.ew-exec-pill.needs { background: #fbeed9; color: #8a5a1f; }
+.ew-exec-pill.neutral { background: var(--bg-inset); color: var(--ink-muted); }
+.ew-exec-card-row { display: flex; justify-content: space-between; font-size: 12.5px; color: var(--ink-muted); }
+.ew-exec-card-row .mono { color: var(--ink); font-weight: 600; }
+.ew-exec-card-footer { padding-top: 6px; border-top: 1px solid var(--line); }
+.ew-exec-factor { font-size: 10.5px; color: var(--ink-faint); }
+
+/* ---- role switcher: this is real navigation between actor views (Supplier /
+   Importer / Verifier), not test tooling — lives inside the narrow settings
+   popover, so it's a vertical menu list, not a horizontal pill. The pill/
+   segmented-control treatment (border-radius:999px) only works in a single
+   row; once "Verifier" wrapped to its own row inside the 320px popover, that
+   huge radius made the whole block balloon into an oval that visually
+   overflowed the popover and bled into the page title behind it. A plain
+   rectangular list has no such failure mode regardless of how many roles
+   there are or how narrow the container is. ---- */
+.ew-role-switcher {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+}
+.ew-role-switcher > span:first-child {
+  font-size: 11px;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ink-faint);
+  margin-bottom: 2px;
+}
+.ew-role-switcher .role-button {
+  width: 100%;
+  min-height: 38px;
+  padding: 8px 12px;
+  border: none;
+  border-radius: var(--radius);
+  font-size: 13.5px;
+  font-weight: 600;
+  text-align: left;
+  background: transparent;
+  color: var(--ink);
+}
+.ew-role-switcher .role-button:hover { background: var(--bg-inset); }
+.ew-role-switcher .role-button[aria-pressed="true"] {
+  background: var(--brand);
+  color: #fff;
+}
+.ew-role-switcher .actor-summary {
+  margin: 4px 0 0;
+  padding: 8px 12px 0;
+  border-top: 1px solid var(--line);
+  font-size: 11.5px;
+  color: var(--ink-muted);
+}
+
+/* ---- required-document stepper ---- */
+.ew-hstepper-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-3);
+}
+.ew-hstepper-lbl {
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--ink-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.ew-hstepper-count {
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+  color: var(--ink-muted);
+}
+.ew-hstepper {
+  display: grid;
+  grid-template-columns: auto 1fr auto 1fr auto 1fr auto;
+  align-items: start;
+  margin-bottom: var(--space-5);
+}
+.ew-hstep {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+}
+.ew-hstep-dot {
+  position: relative;
+  width: 44px;
+  height: 44px;
+  border-radius: 999px;
+  border: 2px solid var(--line-strong);
+  background: var(--bg-inset);
+  flex-shrink: 0;
+}
+.ew-hstep.done .ew-hstep-dot { background: var(--brand); border-color: var(--brand); }
+.ew-hstep.done .ew-hstep-dot::after {
+  content: "";
+  position: absolute; top: 50%; left: 50%;
+  width: 12px; height: 7px;
+  border-left: 2.5px solid #fff; border-bottom: 2.5px solid #fff;
+  transform: translate(-50%, -60%) rotate(-45deg);
+}
+.ew-hstep.problem .ew-hstep-dot { background: var(--alert); border-color: var(--alert); }
+.ew-hstep.problem .ew-hstep-dot::after {
+  content: "!";
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  color: #fff; font-weight: 700; font-size: 17px;
+}
+.ew-hstep-label {
+  font-size: 12.5px; color: var(--ink-muted); text-align: center; white-space: nowrap;
+}
+.ew-hstep.done .ew-hstep-label, .ew-hstep.problem .ew-hstep-label { color: var(--ink); font-weight: 600; }
+.ew-hstep-sub { font-size: 11px; color: var(--alert-deep); text-align: center; }
+.ew-hstep-connector { height: 0; border-top: 2px dashed var(--line-strong); margin-top: 22px; }
+.ew-hstep-connector.done { border-top-color: var(--brand); opacity: 0.55; }
+
+/* ---- history drawer: toggle pinned to the viewport edge (like a chat
+   history sidebar), overlay + dim scrim on open — never pushes the page. ---- */
+.ew-drawer-toggle {
+  position: fixed; top: 22px; left: 22px; z-index: 42;
+  width: 40px; height: 40px; border-radius: var(--radius-max);
+  border: 1px solid var(--line-strong); background: var(--bg-elevated); color: var(--ink-muted);
+  display: flex; align-items: center; justify-content: center; cursor: pointer;
+  box-shadow: 0 1px 2px rgba(26, 26, 24, 0.08), 0 6px 16px -6px rgba(26, 26, 24, 0.18);
+  transition: color var(--ease), border-color var(--ease);
+}
+.ew-drawer-toggle:hover { color: var(--ink); border-color: var(--ink-faint); }
+.ew-drawer-toggle svg { width: 17px; height: 17px; stroke: currentColor; }
+.ew-drawer-badge {
+  position: absolute; top: -6px; right: -6px; min-width: 16px; height: 16px; padding: 0 4px;
+  border-radius: 999px; background: var(--brand); color: #fff;
+  font-size: 10px; font-weight: 700; font-variant-numeric: tabular-nums;
+  display: flex; align-items: center; justify-content: center;
+}
+.ew-drawer-scrim {
+  position: fixed; inset: 0; background: rgba(26, 26, 24, 0.35);
+  opacity: 0; pointer-events: none; transition: opacity 200ms ease; z-index: 40;
+}
+.ew-drawer-scrim.open { opacity: 1; pointer-events: auto; }
+.ew-drawer {
+  position: fixed; top: 0; left: 0; height: 100%; width: min(300px, 88vw);
+  background: var(--bg-elevated); border-right: 1px solid var(--line);
+  box-shadow: 0 12px 40px -12px rgba(26, 26, 24, 0.35);
+  transform: translateX(-100%);
+  transition: transform 240ms cubic-bezier(0.22, 1, 0.36, 1);
+  z-index: 41; padding: var(--space-5) var(--space-4); overflow-y: auto;
+}
+.ew-drawer.open { transform: translateX(0); }
+.ew-drawer-head {
+  font-size: 12px; font-weight: 650; color: var(--ink-muted);
+  text-transform: uppercase; letter-spacing: 0.04em;
+  margin-bottom: var(--space-4); padding-top: 44px;
+}
+.ew-file-list { display: flex; flex-direction: column; gap: var(--space-3); }
+.ew-file-card {
+  border: 1px solid var(--line); border-radius: var(--radius);
+  padding: var(--space-3); background: var(--bg);
+}
+.ew-file-card.error { border-color: var(--alert); }
+.ew-file-card-top { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-2); }
+.ew-fname { font-size: 13px; font-weight: 600; word-break: break-all; }
+.ew-ftype { font-size: 11.5px; color: var(--ink-muted); margin-top: 2px; }
+.ew-file-status {
+  font-size: 11px; font-weight: 650; padding: 2px 8px; border-radius: 999px;
+  white-space: nowrap; flex-shrink: 0;
+}
+.ew-file-status.ready { background: var(--brand-wash); color: var(--brand-deep); }
+.ew-file-status.pending { background: #F1E7D2; color: var(--warn); }
+.ew-file-status.error { background: var(--alert-wash); color: var(--alert-deep); }
+.ew-file-error-msg {
+  margin-top: var(--space-2); padding-top: var(--space-2); border-top: 1px solid var(--line);
+  font-size: 11.5px; color: var(--alert-deep); line-height: 1.5;
+}
+
+/* ---- upload toast notifications ---- */
+.ew-toast-stack {
+  position: fixed; bottom: 18px; right: 18px; z-index: 60;
+  display: flex; flex-direction: column; gap: var(--space-2);
+  width: min(340px, calc(100vw - 36px));
+}
+.ew-toast {
+  background: var(--bg-elevated); border: 1px solid var(--line); border-left: 3px solid var(--alert);
+  border-radius: var(--radius); box-shadow: 0 12px 32px -10px rgba(26, 26, 24, 0.32);
+  padding: var(--space-3) var(--space-3) var(--space-3) var(--space-4);
+  display: flex; gap: var(--space-3); align-items: flex-start;
+  transform: translateX(120%); opacity: 0;
+  transition: transform 260ms cubic-bezier(0.22, 1, 0.36, 1), opacity 200ms ease;
+}
+.ew-toast.show { transform: translateX(0); opacity: 1; }
+.ew-toast-info { border-left-color: var(--brand); }
+.ew-toast-icon {
+  width: 20px; height: 20px; border-radius: 999px; background: var(--alert); color: #fff;
+  display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700;
+  flex-shrink: 0; margin-top: 1px;
+}
+.ew-toast-info .ew-toast-icon { background: var(--brand); font-style: italic; font-family: Georgia, serif; }
+.ew-toast-body { flex: 1; min-width: 0; }
+.ew-toast-title { display: block; font-size: 13px; font-weight: 650; margin-bottom: 2px; }
+.ew-toast-msg { display: block; margin: 0; font-size: 12.5px; color: var(--ink-muted); line-height: 1.5; }
+.ew-toast-actions { display: block; margin-top: var(--space-2); }
+.ew-toast-action {
+  border: none; background: none; padding: 0; font-size: 12px; font-weight: 650;
+  color: var(--brand-deep); cursor: pointer;
+}
+.ew-toast-close {
+  border: none; background: none; padding: 2px; margin: -2px -2px 0 0; cursor: pointer;
+  color: var(--ink-faint); font-size: 12px; line-height: 1; flex-shrink: 0;
+}
+.ew-toast-close:hover { color: var(--ink); }
+
+@media (prefers-reduced-motion: reduce) {
+  .ew-drawer, .ew-drawer-scrim, .ew-toast { transition: none; }
+}
+
+@media (max-width: 640px) {
+  .ew-hstepper { grid-template-columns: repeat(4, auto); gap: 6px; }
+  .ew-hstepper .ew-hstep-connector { display: none; }
+
+  /* Chat composer: scale the (now much larger) desktop pill down slightly so
+     it still fits a narrow screen without wrapping/overflow, while staying
+     well above the old 44px minimum tap target — never smaller than desktop
+     used to be. 16px+ avoids the iOS auto-zoom-on-focus a smaller font
+     triggers. */
+  .ew-chat-input-row {
+    padding: 10px 10px 10px 16px;
+    border-radius: 32px;
+  }
+  .ew-chat-attach {
+    width: 56px;
+    height: 56px;
+  }
+  .ew-chat-attach svg { width: 24px; height: 24px; }
+  .ew-chat-input-row textarea {
+    min-height: 40px;
+    max-height: 180px;
+    font-size: 18px;
+    padding: 12px 6px;
+  }
+  .ew-chat-input-row #chat-send-btn {
+    min-height: 56px;
+    padding: 0 22px;
+    font-size: 16px;
+  }
+}

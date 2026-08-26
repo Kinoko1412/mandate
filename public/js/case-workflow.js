@@ -10,6 +10,12 @@ const REQUIRED_TYPES = [
   'production_report',
   'precursor_list',
 ];
+const REQUIRED_TYPE_LABELS = {
+  electricity_bill: '電費單',
+  fuel_ledger: '燃料紀錄',
+  production_report: '產量表',
+  precursor_list: '前驅物清單',
+};
 const DEMO_EVIDENCE = [
   {
     type: 'electricity_bill',
@@ -77,6 +83,8 @@ const ERROR_GUIDANCE = {
   SERVICE_UNAVAILABLE: ['Proof 或 Gate 尚未驗證。', '保留 METHOD_REVIEW，待 Proof 與 Gate 接妥後再重驗；Agent 不參與 readiness。'],
   TRUST_ADAPTER_FAILURE: ['Trust Engine 暫時無法完成檢查。', '稍後按「重驗 Proof / Gate」重試；案件不會被誤標為 READY。'],
   AGENT_ANALYSIS_FAILED: ['Evidence Agent 預審暫時失敗。', '可重試預審；Proof / Gate 與 readiness 不受 Agent 失敗影響。'],
+  MEDIA_TYPE_NOT_SUPPORTED_FOR_PREVIEW: ['即時預覽只支援 PNG/JPEG 圖片或純文字內容。', 'PDF 請改貼文字內容，或改用截圖／照片上傳。'],
+  PROMPT_INJECTION_DETECTED: ['文件內容疑似含指令注入，已拒絕讀取。', '請確認文件內容後再重新上傳。'],
   EVIDENCE_JSON_INVALID: ['Synthetic evidence 無法解析。', '重置 Demo 後重新載入固定四份文件。'],
   DEMO_SCENARIO_INVALID: ['攻擊情境不在 server allowlist。', '請使用控制台提供的三個固定情境。'],
   CLIPBOARD_UNAVAILABLE: ['瀏覽器未允許剪貼簿操作。', '可直接切換 Verifier，token 已保存在本次 session。'],
@@ -92,6 +100,9 @@ const state = {
   evidence: [],
   grant: readGrant(),
   busy: false,
+  // 記錄每個 required type 最近一次上傳失敗的原因，直到該 type 下一次上傳成功為止；
+  // 驅動必要文件 stepper 的紅色「有問題」節點與抽屜裡的失敗卡片，兩者都是同一份資料。
+  uploadIssues: {},
 };
 
 function $(id) {
@@ -160,6 +171,8 @@ function setBusy(busy) {
   if (!busy && state.role === 'Supplier') {
     renderSupplierEvidence();
     renderGrantControls();
+    renderRequiredStepper();
+    renderEvidenceDrawer();
   }
   if (!busy) applyRoleControls();
 }
@@ -173,7 +186,7 @@ function applyRoleControls() {
     : `${state.role} 無重置權限；請切換 Supplier。`;
 }
 
-async function runAction(action, successMessage) {
+async function runAction(action, successMessage, onError) {
   clearMessages();
   setBusy(true);
   try {
@@ -182,6 +195,7 @@ async function runAction(action, successMessage) {
     return result;
   } catch (error) {
     showError(error);
+    if (onError) onError(error);
     return null;
   } finally {
     setBusy(false);
@@ -474,6 +488,145 @@ function renderSupplier(caseRecord) {
   renderSupplierEvidence();
   renderGrantControls();
   renderRiskReport($('supplier-risk-report'), caseRecord.riskReport);
+  renderRequiredStepper();
+  renderEvidenceDrawer();
+  renderExecOverview(caseRecord);
+  checkStaleCaseNudge(caseRecord);
+}
+
+/**
+ * 「主動照看」的務實版本——2026-08-26 隊長裁示落地，但要老實面對限制：這個 Workers app
+ * 沒有背景排程、沒有推播管道（沒有 email／WebSocket／Push API），不可能做到「使用者不在
+ * 畫面前也會收到通知」那種真正的背景主動提醒。這裡做的是誠實可行的版本：使用者一打開
+ * Supplier 畫面，如果案件建立後已經過了一段時間、必要文件卻還沒到齊，AI 主動先開口講，
+ * 不用使用者先問。同一次瀏覽只提醒一次（用 staleCaseNudgeShown 擋），不會每次 loadRole()
+ * 刷新都重複講一次。
+ */
+let staleCaseNudgeShown = false;
+const STALE_CASE_DAYS = 2;
+function checkStaleCaseNudge(caseRecord) {
+  if (staleCaseNudgeShown || !caseRecord || !caseRecord.createdAt) return;
+  const uploadedTypes = new Set(state.evidence.map((item) => item.type));
+  const missingCount = REQUIRED_TYPES.length - REQUIRED_TYPES.filter((type) => uploadedTypes.has(type)).length;
+  if (missingCount <= 0) return;
+  const daysSince = (Date.now() - Date.parse(caseRecord.createdAt)) / (24 * 60 * 60 * 1000);
+  if (!Number.isFinite(daysSince) || daysSince < STALE_CASE_DAYS) return;
+  staleCaseNudgeShown = true;
+  const text = `這個案件建立後已經 ${Math.floor(daysSince)} 天了，必要文件還缺 ${missingCount} 種，要不要現在補上？`;
+  appendChatMessage({ role: 'ai', text });
+  pushChatHistory('assistant', text);
+}
+
+/**
+ * 「決策者總覽」卡片格——2026-08-26 隊長裁示落地：吃真實的 caseRecord.carbon.shipments
+ * （這個 Demo 案件本身就有 SHIP-A／SHIP-B 兩筆真實批次資料，見 fixtures/normal.json），
+ * 不是 mockup 那種寫死的 SHIP-A~D 假資料。批次數量、狀態種類都照案件實際有幾筆就顯示
+ * 幾張卡，不會為了畫面好看硬湊卡片數。
+ */
+/**
+ * 刻意不重用既有的 metric()／.metric class——那個是給整個 app 原本「工業感控制台」風格
+ * 用的（米棕色底、單格自己的邊框），套進決策者總覽這種要仿 mockup 乾淨白卡片風格的地方，
+ * 會疊出雙重邊框、顏色也悶，使用者已經直接反映「跟參考圖樣式不一樣、很醜」。這裡另外寫
+ * 一個專用版本：純白底、邊框只靠 grid 的 1px 縫隙做，不疊加格子自己的 border。
+ */
+function execMetric(label, value) {
+  const cell = document.createElement('div');
+  cell.className = 'ew-exec-metric';
+  const valueEl = document.createElement('strong');
+  valueEl.textContent = String(value);
+  const labelEl = document.createElement('span');
+  labelEl.textContent = label;
+  cell.append(valueEl, labelEl);
+  return cell;
+}
+
+function execStatusTone(status) {
+  const s = String(status || '').toUpperCase();
+  if (s.includes('READY')) return 'ready';
+  if (s.includes('REVIEW')) return 'review';
+  if (s.includes('BLOCK') || s.includes('DENY') || s.includes('REVOKE')) return 'blocked';
+  if (s.includes('NEED') || s.includes('MISSING')) return 'needs';
+  return 'neutral';
+}
+
+function renderExecOverview(caseRecord) {
+  const summaryEl = $('exec-summary');
+  const grid = $('exec-grid');
+  if (!summaryEl || !grid) return;
+  const shipments = caseRecord.carbon && Array.isArray(caseRecord.carbon.shipments) ? caseRecord.carbon.shipments : [];
+  const readyCount = shipments.filter((item) => execStatusTone(item.allocationStatus) === 'ready').length;
+
+  replaceChildren(summaryEl, [
+    execMetric('總批次', shipments.length),
+    execMetric('準備完成', readyCount),
+    execMetric('需要處理', shipments.length - readyCount),
+    execMetric('案件狀態', caseRecord.status || '—'),
+  ]);
+
+  if (!shipments.length) {
+    const empty = document.createElement('p');
+    empty.className = 'empty-state';
+    empty.textContent = '這個案件目前沒有出貨批次資料。';
+    replaceChildren(grid, [empty]);
+    return;
+  }
+
+  const cards = shipments.map((shipment) => {
+    const card = document.createElement('article');
+    card.className = 'ew-exec-card';
+
+    const top = document.createElement('div');
+    top.className = 'ew-exec-card-top';
+    const id = document.createElement('span');
+    id.className = 'ew-exec-card-id mono';
+    id.textContent = shipment.shipmentId || '—';
+    top.append(id);
+    card.append(top);
+
+    const pill = document.createElement('span');
+    pill.className = 'ew-exec-pill ' + execStatusTone(shipment.allocationStatus);
+    pill.textContent = shipment.allocationStatus || '—';
+    card.append(pill);
+
+    const rows = [
+      ['出貨量', shipment.quantityTonnes != null ? `${shipment.quantityTonnes} ${shipment.quantityUnit || 'tonne'}` : '—'],
+      ['預估排放', shipment.allocatedEmissions != null ? `${shipment.allocatedEmissions} tCO2e` : '—'],
+    ];
+    rows.forEach(([label, value]) => {
+      const row = document.createElement('div');
+      row.className = 'ew-exec-card-row';
+      const k = document.createElement('span');
+      k.textContent = label;
+      const v = document.createElement('span');
+      v.className = 'mono';
+      v.textContent = value;
+      row.append(k, v);
+      card.append(row);
+    });
+
+    const footer = document.createElement('div');
+    footer.className = 'ew-exec-card-footer';
+    const factor = document.createElement('span');
+    factor.className = 'ew-exec-factor mono';
+    factor.textContent = shipment.factorSetId || '—';
+    footer.append(factor);
+    card.append(footer);
+
+    return card;
+  });
+  replaceChildren(grid, cards);
+}
+
+function setExecView(showExec) {
+  const agentView = $('agent-view');
+  const execView = $('exec-overview');
+  const toggle = $('exec-view-switch');
+  if (!agentView || !execView || !toggle) return;
+  agentView.hidden = showExec;
+  execView.hidden = !showExec;
+  toggle.classList.toggle('on', showExec);
+  toggle.setAttribute('aria-checked', String(showExec));
+  if (showExec) renderExecOverview(state.caseRecord || {});
 }
 
 function renderSupplierEvidence() {
@@ -498,6 +651,258 @@ function renderSupplierEvidence() {
     $('supplier-evidence'),
     [createTable(['Type', 'ID', 'Filename', 'Covered dates', 'Source', 'SHA-256', 'Human confirm'], rows)]
   );
+}
+
+/**
+ * 橫向必要文件 stepper：done（綠）＝該 type 至少有一筆已上傳的 evidence；
+ * problem（紅）＝該 type 最近一次上傳失敗且至今尚未成功補上；其餘＝尚未上傳（灰）。
+ * 只反映「有沒有上傳」，不疊加人工確認狀態——人工確認是另一個獨立步驟，Evidence Index
+ * 裡的「已確認／人工確認」按鈕已經在管，這裡不重複疊加語意。
+ */
+function renderRequiredStepper() {
+  const container = $('required-stepper');
+  const countLabel = $('required-stepper-count');
+  if (!container || !countLabel) return;
+
+  const uploadedTypes = new Set(state.evidence.map((item) => item.type));
+  countLabel.textContent = `${REQUIRED_TYPES.filter((type) => uploadedTypes.has(type)).length} / ${REQUIRED_TYPES.length}`;
+
+  const nodes = [];
+  REQUIRED_TYPES.forEach((type, index) => {
+    if (index > 0) {
+      const connector = document.createElement('span');
+      connector.className = uploadedTypes.has(REQUIRED_TYPES[index - 1])
+        ? 'ew-hstep-connector done'
+        : 'ew-hstep-connector';
+      nodes.push(connector);
+    }
+    const issue = state.uploadIssues[type];
+    const isDone = uploadedTypes.has(type);
+    const step = document.createElement('div');
+    step.className = 'ew-hstep' + (issue ? ' problem' : isDone ? ' done' : '');
+    const dot = document.createElement('span');
+    dot.className = 'ew-hstep-dot';
+    const label = document.createElement('span');
+    label.className = 'ew-hstep-label';
+    label.textContent = REQUIRED_TYPE_LABELS[type] || type;
+    step.append(dot, label);
+    if (issue) {
+      const sub = document.createElement('span');
+      sub.className = 'ew-hstep-sub';
+      sub.textContent = issue.reason;
+      step.append(sub);
+    }
+    nodes.push(step);
+  });
+  replaceChildren(container, nodes);
+}
+
+/**
+ * 已上傳文件的收合式抽屜（開關固定在畫面左上角，展開時用覆蓋層＋背景變暗，不推擠主內容）。
+ * 同時列出已上傳成功的 evidence（沿用同一份 state.evidence，不重複打 API）跟目前還沒補上、
+ * 但最近一次嘗試上傳失敗的 required type，讓「已完成／待確認／有問題」三種狀態都看得到。
+ */
+function renderEvidenceDrawer() {
+  const list = $('evidence-drawer-list');
+  const countBadge = $('evidence-drawer-count');
+  if (!list || !countBadge) return;
+
+  const uploadedTypes = new Set(state.evidence.map((item) => item.type));
+  const failedTypes = Object.keys(state.uploadIssues).filter((type) => !uploadedTypes.has(type));
+  countBadge.textContent = String(state.evidence.length + failedTypes.length);
+
+  if (!state.evidence.length && !failedTypes.length) {
+    const empty = document.createElement('p');
+    empty.className = 'empty-state';
+    empty.textContent = '尚未上傳任何 evidence。';
+    replaceChildren(list, [empty]);
+    return;
+  }
+
+  const cards = state.evidence.map((item) => {
+    const card = document.createElement('article');
+    card.className = 'ew-file-card';
+    const top = document.createElement('div');
+    top.className = 'ew-file-card-top';
+    const meta = document.createElement('div');
+    meta.className = 'ew-file-meta';
+    const fname = document.createElement('div');
+    fname.className = 'ew-fname';
+    fname.textContent = item.filename;
+    const ftype = document.createElement('div');
+    ftype.className = 'ew-ftype';
+    ftype.textContent = `${item.type} · ${item.coveredFrom} – ${item.coveredTo}`;
+    meta.append(fname, ftype);
+    const status = document.createElement('span');
+    status.className = 'ew-file-status ' + (item.humanConfirmed ? 'ready' : 'pending');
+    status.textContent = item.humanConfirmed ? '已確認' : '待確認';
+    top.append(meta, status);
+    card.append(top);
+    return card;
+  });
+
+  const errorCards = failedTypes.map((type) => {
+    const issue = state.uploadIssues[type];
+    const card = document.createElement('article');
+    card.className = 'ew-file-card error';
+    const top = document.createElement('div');
+    top.className = 'ew-file-card-top';
+    const meta = document.createElement('div');
+    meta.className = 'ew-file-meta';
+    const fname = document.createElement('div');
+    fname.className = 'ew-fname';
+    fname.textContent = REQUIRED_TYPE_LABELS[type] || type;
+    const ftype = document.createElement('div');
+    ftype.className = 'ew-ftype';
+    ftype.textContent = `${type} · 上傳失敗`;
+    meta.append(fname, ftype);
+    const status = document.createElement('span');
+    status.className = 'ew-file-status error';
+    status.textContent = issue.code;
+    top.append(meta, status);
+    const msg = document.createElement('div');
+    msg.className = 'ew-file-error-msg';
+    msg.textContent = issue.reason;
+    card.append(top, msg);
+    return card;
+  });
+
+  replaceChildren(list, [...cards, ...errorCards]);
+}
+
+/**
+ * 四幕 Demo 控制台、角色切換、案件摘要、Audit Timeline 這些是給團隊自己測試/展示
+ * 用的技術面板，不是操作人員第一眼該看到的東西——預設收起，只留一個小按鈕，展開
+ * 時內容照舊（不拆、不刪），跟 setEvidenceDrawer() 用同一種 hidden 屬性切換寫法。
+ */
+function setDevTools(open) {
+  const toggle = $('dev-tools-toggle');
+  const panel = $('dev-tools-panel');
+  const label = $('dev-tools-toggle-label');
+  if (!toggle || !panel) return;
+  panel.hidden = !open;
+  toggle.classList.toggle('open', open);
+  toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+  if (label) label.textContent = open ? '收起測試/開發工具' : '顯示測試/開發工具';
+}
+
+function setManualForm(open) {
+  const toggle = $('manual-form-toggle');
+  const panel = $('manual-form-panel');
+  const label = $('manual-form-toggle-label');
+  if (!toggle || !panel) return;
+  panel.hidden = !open;
+  toggle.classList.toggle('open', open);
+  toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+  if (label) label.textContent = open ? '收起手動輸入表單' : '顯示手動輸入表單';
+}
+
+function setSupplierTools(open) {
+  const toggle = $('supplier-tools-toggle');
+  const panel = $('supplier-tools-panel');
+  const label = $('supplier-tools-toggle-label');
+  if (!toggle || !panel) return;
+  panel.hidden = !open;
+  toggle.classList.toggle('open', open);
+  toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+  if (label) label.textContent = open ? '收起案件資訊與進階工具' : '顯示案件資訊與進階工具';
+}
+
+function setEvidenceDrawer(open) {
+  const toggle = $('evidence-drawer-toggle');
+  const drawer = $('evidence-drawer');
+  const scrim = $('evidence-drawer-scrim');
+  if (!toggle || !drawer || !scrim) return;
+  drawer.classList.toggle('open', open);
+  scrim.classList.toggle('open', open);
+  drawer.setAttribute('aria-hidden', open ? 'false' : 'true');
+  toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+  toggle.setAttribute('aria-label', open ? '收合已上傳文件' : '展開已上傳文件');
+}
+
+/**
+ * 上傳/擷取出問題時的浮動通知——跟必要文件 stepper 的紅色節點、抽屜裡的失敗卡片是同一份
+ * state.uploadIssues，只是多一個「當下立刻跳出來」的提醒層。全部用 createElement/textContent
+ * 組出來，刻意不走「設 HTML 字串再整段塞進節點」那條路——跟這支檔案其他 render 函式一致。
+ */
+/**
+ * opts.key + opts.persistent 是給「頁面本來就有的常駐提醒」用的（Vault 加密狀態、
+ * Demo 免責聲明）——2026-08-26 隊長裁示落地：把這兩則原本佔頁面版面的橫幅改成右下角
+ * 氣泡通知，同一個 key 重複呼叫是「更新內容」不是「疊一則新的」，persistent 則是不會
+ * 7 秒自動消失（免責聲明不該不小心被使用者錯過）。既有的「上傳失敗」錯誤 toast 呼叫端
+ * 完全不用改，行為跟原本一樣。
+ */
+const persistentToasts = {};
+
+function showToast(opts) {
+  const stack = $('toast-stack');
+  if (!stack) return;
+
+  if (opts.key && persistentToasts[opts.key]) {
+    const existing = persistentToasts[opts.key];
+    const titleEl = existing.querySelector('.ew-toast-title');
+    if (titleEl) titleEl.textContent = opts.title || '';
+    existing.querySelector('.ew-toast-msg').textContent = opts.message;
+    return;
+  }
+
+  const variant = opts.variant || 'error';
+  const showViewAction = opts.showViewAction !== undefined ? opts.showViewAction : variant === 'error';
+  const el = document.createElement('div');
+  el.className = 'ew-toast ew-toast-' + variant;
+
+  const icon = document.createElement('span');
+  icon.className = 'ew-toast-icon';
+  icon.textContent = variant === 'info' ? 'i' : '!';
+  icon.setAttribute('aria-hidden', 'true');
+
+  const body = document.createElement('div');
+  body.className = 'ew-toast-body';
+  if (opts.title) {
+    const title = document.createElement('strong');
+    title.className = 'ew-toast-title';
+    title.textContent = opts.title;
+    body.append(title);
+  }
+  const message = document.createElement('p');
+  message.className = 'ew-toast-msg';
+  message.textContent = opts.message;
+  body.append(message);
+
+  const closeButton = document.createElement('button');
+  closeButton.type = 'button';
+  closeButton.className = 'ew-toast-close';
+  closeButton.setAttribute('aria-label', '關閉');
+  closeButton.textContent = '✕';
+
+  function dismiss() {
+    el.classList.remove('show');
+    setTimeout(() => el.remove(), 260);
+    if (opts.key) delete persistentToasts[opts.key];
+  }
+
+  if (showViewAction) {
+    const actions = document.createElement('div');
+    actions.className = 'ew-toast-actions';
+    const actionButton = document.createElement('button');
+    actionButton.type = 'button';
+    actionButton.className = 'ew-toast-action';
+    actionButton.textContent = '查看詳情';
+    actionButton.addEventListener('click', () => {
+      dismiss();
+      setEvidenceDrawer(true);
+    });
+    actions.append(actionButton);
+    body.append(actions);
+  }
+
+  el.append(icon, body, closeButton);
+  stack.append(el);
+  requestAnimationFrame(() => el.classList.add('show'));
+  closeButton.addEventListener('click', dismiss);
+
+  if (opts.key) persistentToasts[opts.key] = el;
+  if (!opts.persistent) setTimeout(dismiss, 7000);
 }
 
 function fillEvidenceSelect(select, evidence, selectedId) {
@@ -596,9 +1001,14 @@ function renderVerifier(caseRecord, indexPayload) {
  */
 async function refreshUploadVaultStatus() {
   const status = await VaultCrypto.getVaultKeyStatus('Supplier');
-  $('upload-vault-status').textContent = status.registered
-    ? '🔒 Verifier 已註冊 Vault 裝置，內容將自動以其裝置公鑰加密後上傳。'
-    : '⚠ Verifier 尚未註冊 Vault 裝置，內容將以現有方式上傳（未加密）。';
+  showToast({
+    key: 'vault-status',
+    variant: 'info',
+    persistent: true,
+    message: status.registered
+      ? '🔒 Verifier 已註冊 Vault 裝置，內容將自動以其裝置公鑰加密後上傳。'
+      : '⚠ Verifier 尚未註冊 Vault 裝置，內容將以現有方式上傳（未加密）。',
+  });
 }
 
 async function refreshVaultKeyStatus() {
@@ -792,9 +1202,24 @@ async function refreshAudit() {
   renderAudit(payload.events || []);
 }
 
+function base64ToBytes(value) {
+  const binary = atob(value);
+  return Uint8Array.from(binary, (char) => char.charCodeAt(0));
+}
+
+/**
+ * input.contentBase64 是給聊天式上傳（見 submitChatUpload）用的：那條路徑手上已經是真的
+ * 圖片二進位 base64（FileReader 讀出來的），不是使用者打的文字，不能再套 utf8ToBase64
+ * 重新編碼一次文字——那樣會把圖片位元組錯誤地當成 UTF-8 字串處理，資料會壞掉。既有的手動
+ * 表單／seedEvidence 都只傳 input.content（文字），這裡完全不受影響、行為不變。
+ */
 async function uploadEvidence(input) {
-  const plainBytes = VaultCryptoCore.utf8ToBytes(input.content);
-  let vaultFields = { contentBase64: utf8ToBase64(input.content), vaultEncrypted: false };
+  const hasRawBase64 = typeof input.contentBase64 === 'string';
+  const plainBytes = hasRawBase64 ? base64ToBytes(input.contentBase64) : VaultCryptoCore.utf8ToBytes(input.content);
+  let vaultFields = {
+    contentBase64: hasRawBase64 ? input.contentBase64 : utf8ToBase64(input.content),
+    vaultEncrypted: false,
+  };
   try {
     const encrypted = await VaultCrypto.encryptForVault(plainBytes);
     if (encrypted) vaultFields = encrypted;
@@ -820,14 +1245,394 @@ async function uploadEvidence(input) {
   });
 }
 
+// ---- chat-style upload: attach a file or paste text, AI replies with candidate
+// fields to confirm, confirming actually calls the same uploadEvidence()/confirmEvidence()
+// as the manual form below — this is a friendlier front door onto the same real endpoints,
+// not a separate parallel system. ----
+let chatAttachedFile = null;
+
+/**
+ * 對話「記憶」——2026-08-26 隊長裁示落地：之前每一句問答都是獨立的，AI 不記得兩句話前
+ * 問過什麼。這裡只存精簡過的文字摘要（使用者打的字、AI 的回覆或一句話結果），不存整份
+ * 檔案內容或 base64——重送整張圖片給每一輪對話會不必要地貴，而且真的要追問某份文件時，
+ * meta 裡本來就還留著那份內容，用不到歷史紀錄。伺服器端會對每一則歷史內容重新跑一次
+ * containsInjection，不是前端說安全就直接信任。
+ */
+let chatHistoryLog = [];
+const CHAT_HISTORY_MAX_TURNS = 12;
+function pushChatHistory(role, content) {
+  const text = String(content || '').trim();
+  if (!text) return;
+  chatHistoryLog.push({ role, content: text.slice(0, 500) });
+  if (chatHistoryLog.length > CHAT_HISTORY_MAX_TURNS) {
+    chatHistoryLog = chatHistoryLog.slice(-CHAT_HISTORY_MAX_TURNS);
+  }
+}
+
+/**
+ * 使用者真的檔名（尤其是中文檔名，例如「痛點市場驗證.pdf」）拿去當 API 的 filename 會被
+ * server 端的 SAFE_SOURCE_FILE 白名單擋掉（只收 ASCII）——那道白名單是防 prompt injection
+ * 的一部分，不能為了遷就中文檔名放寬。所以聊天框一律另外產生一個 ASCII-only 的安全檔名送
+ * 給 API，畫面上（聊天泡泡、附件標籤）照樣顯示使用者真正的原始檔名。
+ */
+function makeSafeChatFilename(mediaType) {
+  const ext = mediaType === 'image/jpeg' ? '.jpg' : mediaType === 'image/png' ? '.png' : '.txt';
+  return `chat-upload-${Date.now()}${ext}`;
+}
+
+let pdfjsModulePromise = null;
+function loadPdfJs() {
+  if (!pdfjsModulePromise) {
+    pdfjsModulePromise = import('/vendor/pdfjs/pdf.min.mjs').then((mod) => {
+      mod.GlobalWorkerOptions.workerSrc = '/vendor/pdfjs/pdf.worker.min.mjs';
+      return mod;
+    });
+  }
+  return pdfjsModulePromise;
+}
+
+/**
+ * PDF 沒有真的二進位解析能力（見 server 端 previewEvidence 的註解）——這裡是實際解法：
+ * 在瀏覽器端用 pdf.js（自架，不連 CDN）把第一頁畫到 canvas、轉成 PNG，再走既有、已經測過
+ * 的圖片辨識路徑。只轉第一頁是刻意的取捨，訊息裡會老實講清楚，不假裝支援多頁。
+ */
+async function convertPdfFirstPageToPng(file) {
+  const pdfjsLib = await loadPdfJs();
+  const arrayBuffer = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  const page = await pdf.getPage(1);
+  const viewport = page.getViewport({ scale: 2 });
+  const canvas = document.createElement('canvas');
+  canvas.width = viewport.width;
+  canvas.height = viewport.height;
+  const ctx = canvas.getContext('2d');
+  await page.render({ canvasContext: ctx, viewport }).promise;
+  const dataUrl = canvas.toDataURL('image/png');
+  return dataUrl.slice(dataUrl.indexOf(',') + 1);
+}
+
+function renderChatFileChip() {
+  const chip = $('chat-file-chip');
+  const nameEl = $('chat-file-name');
+  if (!chip || !nameEl) return;
+  if (chatAttachedFile) {
+    nameEl.textContent = chatAttachedFile.name;
+    chip.hidden = false;
+  } else {
+    chip.hidden = true;
+  }
+}
+
+function readFileAsBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = String(reader.result || '');
+      const commaIndex = result.indexOf(',');
+      resolve(commaIndex >= 0 ? result.slice(commaIndex + 1) : result);
+    };
+    reader.onerror = () => reject(reader.error || new Error('讀取檔案失敗'));
+    reader.readAsDataURL(file);
+  });
+}
+
+function appendChatMessage({ role, text, node }) {
+  const thread = $('chat-thread');
+  if (!thread) return null;
+  const bubble = document.createElement('div');
+  bubble.className = 'ew-chat-bubble ' + (role === 'ai' ? 'ai' : 'user');
+  if (node) {
+    bubble.appendChild(node);
+  } else {
+    const p = document.createElement('p');
+    p.textContent = text;
+    bubble.appendChild(p);
+  }
+  thread.appendChild(bubble);
+  thread.scrollTop = thread.scrollHeight;
+  return bubble;
+}
+
+async function handleChatFileSelect(file) {
+  if (!file) return;
+  if (file.type === 'application/pdf') {
+    if (file.size > 8 * 1024 * 1024) {
+      appendChatMessage({ role: 'ai', text: 'PDF 超過 8 MB 上限，請改用較小的檔案。' });
+      $('chat-file-input').value = '';
+      return;
+    }
+    const thinking = appendChatMessage({ role: 'ai', text: '正在把 PDF 第一頁轉成圖片…' });
+    try {
+      const base64 = await convertPdfFirstPageToPng(file);
+      if (thinking) thinking.remove();
+      appendChatMessage({ role: 'ai', text: `已把「${file.name}」第一頁轉成圖片準備讀取；只會讀第一頁，多頁 PDF 請分開上傳每一頁的截圖。` });
+      chatAttachedFile = {
+        name: file.name.replace(/\.pdf$/i, '') + '-p1.png',
+        safeName: makeSafeChatFilename('image/png'),
+        mediaType: 'image/png',
+        base64,
+      };
+      renderChatFileChip();
+    } catch (err) {
+      if (thinking) thinking.remove();
+      appendChatMessage({ role: 'ai', text: 'PDF 轉換失敗（可能是掃描檔或格式特殊），請改用截圖／照片上傳，或直接貼上文字內容。' });
+    }
+    $('chat-file-input').value = '';
+    return;
+  }
+  if (file.type !== 'image/png' && file.type !== 'image/jpeg') {
+    appendChatMessage({ role: 'ai', text: `不支援 ${file.type || '這種'} 格式，請改用 PNG／JPEG／PDF，或直接貼上文字內容。` });
+    $('chat-file-input').value = '';
+    return;
+  }
+  if (file.size > 512 * 1024) {
+    appendChatMessage({ role: 'ai', text: '檔案超過 512 KB 上限，請改用較小的檔案。' });
+    $('chat-file-input').value = '';
+    return;
+  }
+  chatAttachedFile = {
+    name: file.name,
+    safeName: makeSafeChatFilename(file.type),
+    mediaType: file.type,
+    base64: await readFileAsBase64(file),
+  };
+  renderChatFileChip();
+}
+
+function buildEntryPreviewNode(result, meta) {
+  const wrap = document.createElement('div');
+  const entries = result.entries || [];
+
+  if (result.chatReply) {
+    const reply = document.createElement('p');
+    reply.textContent = result.chatReply;
+    wrap.appendChild(reply);
+    return wrap;
+  }
+
+  if (!result.documentType) {
+    const head = document.createElement('p');
+    head.className = 'ew-chat-ai-head';
+    head.textContent = '看不出來這是必要文件裡的哪一種，可以直接點選，或用打字告訴我：';
+    wrap.appendChild(head);
+    const chips = document.createElement('div');
+    chips.className = 'ew-chat-ai-actions';
+    REQUIRED_TYPES.forEach((type) => {
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'button secondary';
+      chip.textContent = REQUIRED_TYPE_LABELS[type] || type;
+      chip.addEventListener('click', async () => {
+        chips.remove();
+        await runPreviewAndRespond(meta, `這是${REQUIRED_TYPE_LABELS[type] || type}`);
+      });
+      chips.appendChild(chip);
+    });
+    wrap.appendChild(chips);
+    return wrap;
+  }
+
+  const typeLabel = REQUIRED_TYPE_LABELS[result.documentType] || result.documentType;
+  const head = document.createElement('p');
+  head.className = 'ew-chat-ai-head';
+  head.textContent = entries.length
+    ? `看起來是「${typeLabel}」，已擷取 ${entries.length} 筆欄位：`
+    : `看起來是「${typeLabel}」，但沒有擷取到任何結構化欄位，可以改用下方手動輸入表單。`;
+  wrap.appendChild(head);
+
+  if (entries.length) {
+    const list = document.createElement('ul');
+    list.className = 'ew-chat-entries';
+    entries.forEach((entry) => {
+      const li = document.createElement('li');
+      const label = document.createElement('span');
+      label.className = 'k';
+      label.textContent = entry.field;
+      const value = document.createElement('span');
+      value.className = 'v';
+      value.textContent = `${entry.value}${entry.unit ? ' ' + entry.unit : ''}`;
+      const conf = document.createElement('span');
+      conf.className = 'c';
+      conf.textContent = `信心度 ${Math.round(entry.confidence * 100)}%`;
+      li.append(label, value, conf);
+      list.appendChild(li);
+    });
+    wrap.appendChild(list);
+  }
+
+  const actions = document.createElement('div');
+  actions.className = 'ew-chat-ai-actions';
+  const confirmBtn = document.createElement('button');
+  confirmBtn.type = 'button';
+  confirmBtn.className = 'button';
+  confirmBtn.textContent = '確認並送出';
+  confirmBtn.disabled = !entries.length;
+  const discardBtn = document.createElement('button');
+  discardBtn.type = 'button';
+  discardBtn.className = 'button secondary';
+  discardBtn.textContent = '不對，捨棄';
+  actions.append(confirmBtn, discardBtn);
+  wrap.appendChild(actions);
+
+  confirmBtn.addEventListener('click', async () => {
+    confirmBtn.disabled = true;
+    discardBtn.disabled = true;
+    const type = result.documentType;
+    const result2 = await runAction(
+      () =>
+        uploadEvidence({
+          type,
+          filename: meta.filename,
+          mediaType: meta.mediaType,
+          contentBase64: meta.contentBase64,
+          coveredFrom: '2026-01-01',
+          coveredTo: '2026-12-31',
+          source: 'chat-upload',
+        }),
+      'Evidence 已安全上傳；原始內容不會出現在 Audit Timeline。',
+      (error) => {
+        const presentation = errorPresentation(error);
+        state.uploadIssues[type] = { code: presentation.code, reason: presentation.reason };
+      }
+    );
+    if (result2) {
+      delete state.uploadIssues[type];
+      await runAction(loadRole);
+      await confirmEvidence(result2.evidence.evidenceId);
+      actions.replaceChildren();
+      const done = document.createElement('p');
+      done.className = 'ew-chat-ai-head';
+      done.textContent = `${meta.displayName || meta.filename} 已送出並確認完成。`;
+      wrap.appendChild(done);
+      pushChatHistory('assistant', done.textContent);
+      await runAutoAnalysisInChat();
+    } else {
+      confirmBtn.disabled = false;
+      discardBtn.disabled = false;
+    }
+  });
+
+  discardBtn.addEventListener('click', () => {
+    wrap.replaceChildren();
+    const note = document.createElement('p');
+    note.className = 'ew-chat-ai-head';
+    note.textContent = '已捨棄，未送出。';
+    wrap.appendChild(note);
+  });
+
+  return wrap;
+}
+
+function summarizeResultForHistory(result) {
+  if (result.chatReply) return result.chatReply;
+  if (result.documentType) {
+    const label = REQUIRED_TYPE_LABELS[result.documentType] || result.documentType;
+    return `已從文件擷取 ${(result.entries || []).length} 筆「${label}」欄位，等待使用者確認。`;
+  }
+  return '看不出來這份輸入是哪一種必要文件，已請使用者澄清。';
+}
+
+async function runPreviewAndRespond(meta, userNote) {
+  if (userNote) {
+    appendChatMessage({ role: 'user', text: userNote });
+    pushChatHistory('user', userNote);
+  }
+  const result = await runAction(
+    () =>
+      api('/api/evidence/preview', {
+        method: 'POST',
+        role: 'Supplier',
+        body: { caseId: CASE_ID, filename: meta.filename, mediaType: meta.mediaType, contentBase64: meta.contentBase64, userNote, chatHistory: chatHistoryLog },
+      }),
+    null,
+    (error) => {
+      const presentation = errorPresentation(error);
+      appendChatMessage({ role: 'ai', text: presentation.reason || '暫時無法讀取這份文件。' });
+    }
+  );
+  if (result) {
+    appendChatMessage({ role: 'ai', node: buildEntryPreviewNode(result, meta) });
+    pushChatHistory('assistant', summarizeResultForHistory(result));
+    if (result.documentType && chatAttachedFile && chatAttachedFile.base64 === meta.contentBase64) {
+      // 這次點分類按鈕重試用的內容就是目前composer裡附加的檔案，分類成功了就清掉，
+      // 避免使用者以為附件還卡在輸入框裡。
+      chatAttachedFile = null;
+      renderChatFileChip();
+      $('chat-file-input').value = '';
+    }
+  }
+}
+
+async function sendChatUpload() {
+  const textValue = $('chat-text-input').value.trim();
+  if (!chatAttachedFile && !textValue) {
+    appendChatMessage({ role: 'ai', text: '請先附加圖片／PDF，或貼上文字內容再送出。' });
+    return;
+  }
+
+  const filename = chatAttachedFile ? chatAttachedFile.safeName : `chat-${Date.now()}.txt`;
+  const displayName = chatAttachedFile ? chatAttachedFile.name : filename;
+  const mediaType = chatAttachedFile ? chatAttachedFile.mediaType : 'text/plain';
+  const contentBase64 = chatAttachedFile ? chatAttachedFile.base64 : utf8ToBase64(textValue);
+  const userNote = chatAttachedFile ? textValue : '';
+
+  appendChatMessage({ role: 'user', text: chatAttachedFile ? `📎 ${displayName}${textValue ? '　' + textValue : ''}` : textValue });
+  pushChatHistory('user', chatAttachedFile ? `[附加檔案：${displayName}]${textValue ? ' ' + textValue : ''}` : textValue);
+
+  const sendBtn = $('chat-send-btn');
+  sendBtn.disabled = true;
+  const meta = { filename, displayName, mediaType, contentBase64 };
+  const result = await runAction(
+    () =>
+      api('/api/evidence/preview', {
+        method: 'POST',
+        role: 'Supplier',
+        body: { caseId: CASE_ID, filename, mediaType, contentBase64, userNote: userNote || undefined, chatHistory: chatHistoryLog },
+      }),
+    null,
+    (error) => {
+      const presentation = errorPresentation(error);
+      appendChatMessage({ role: 'ai', text: presentation.reason || '暫時無法讀取這份文件。' });
+    }
+  );
+  sendBtn.disabled = false;
+  if (result) {
+    appendChatMessage({ role: 'ai', node: buildEntryPreviewNode(result, meta) });
+    pushChatHistory('assistant', summarizeResultForHistory(result));
+  }
+  $('chat-text-input').value = '';
+  if (result && (result.documentType || result.chatReply)) {
+    // 已經成功分類，或這次根本是聊天訊息不是文件——附件在這個交換裡的任務都結束了
+    // （後續確認/捨棄都用 meta 裡存好的內容）。
+    chatAttachedFile = null;
+    renderChatFileChip();
+    $('chat-file-input').value = '';
+  }
+  // documentType 跟 chatReply 都是 null 時（單純判斷不出來是哪種文件）刻意保留
+  // chatAttachedFile：使用者下一句澄清文字（或點分類按鈕）還要用同一份內容重新分類，
+  // 不能讓他們重新選一次檔案。
+}
+
 async function handleUpload(event) {
   event.preventDefault();
   const form = new FormData(event.currentTarget);
+  const input = Object.fromEntries(form.entries());
   const result = await runAction(
-    () => uploadEvidence(Object.fromEntries(form.entries())),
-    'Evidence 已安全上傳；原始內容不會出現在 Audit Timeline。'
+    () => uploadEvidence(input),
+    'Evidence 已安全上傳；原始內容不會出現在 Audit Timeline。',
+    (error) => {
+      const presentation = errorPresentation(error);
+      state.uploadIssues[input.type] = { code: presentation.code, reason: presentation.reason };
+      showToast({
+        title: `${input.filename || input.type} 上傳失敗`,
+        message: presentation.reason,
+      });
+    }
   );
-  if (result) await runAction(loadRole);
+  if (result) {
+    delete state.uploadIssues[input.type];
+    await runAction(loadRole);
+  }
 }
 
 async function seedEvidence() {
@@ -910,6 +1715,57 @@ async function submitCase() {
     ? result.readiness.message
     : '案件已提交。';
   showNotice(message);
+}
+
+const DISCREPANCY_LABELS = {
+  ELECTRICITY_INTENSITY_OUT_OF_RANGE: '用電量',
+  FUEL_INTENSITY_OUT_OF_RANGE: '燃料量',
+  PRECURSOR_RATIO_OUT_OF_RANGE: '前驅物量',
+};
+
+/**
+ * 把 RiskReport（結構化、已經算好的真實資料——missingEvidence／discrepancies）套版成
+ * 對話口吻的句子，2026-08-26 隊長裁示落地：不是另外叫一次 LLM 生成，是把已經有的真實分析
+ * 結果直接講出來，跟畫面上「顯示案件資訊與進階工具」裡的完整報告是同一份資料、只是換一種
+ * 呈現方式，不會兩邊講的不一樣。
+ */
+function formatRiskReportForChat(report) {
+  const lines = [];
+  const missing = report.missingEvidence || [];
+  if (missing.length) {
+    const labels = missing.map((item) => REQUIRED_TYPE_LABELS[item.requiredEvidence] || item.requiredEvidence);
+    lines.push(`必要文件還缺 ${labels.length} 種：${labels.join('、')}。`);
+  } else {
+    lines.push('四種必要文件都到齊了。');
+  }
+  (report.discrepancies || []).forEach((d) => {
+    const label = DISCREPANCY_LABELS[d.ruleId] || d.ruleId;
+    const ratio = Number.isFinite(d.difference) ? d.difference.toFixed(2) : '—';
+    lines.push(`${label}跟產量的比例是 ${ratio}，超出 Demo 預期範圍，數字對得起來嗎？要不要確認一下。`);
+  });
+  if (!missing.length && !(report.discrepancies || []).length) {
+    lines.push('目前沒有發現缺件或數字異常，但這只是 Demo 分析，不代表正式查驗完成。');
+  }
+  lines.push('完整分析結果可以打開下面的「顯示案件資訊與進階工具」查看。');
+  return lines.join('\n');
+}
+
+/**
+ * 上傳＋確認一份 evidence 之後自動接著跑案件級分析，結果接在同一個對話串裡講——
+ * 2026-08-26 隊長裁示落地：不用使用者另外去點「執行 Evidence Agent 預審」那個藏在進階
+ * 工具裡的按鈕，AI 主動照看整個案件，不是只回應單一上傳。呼叫既有 analyzeCase()，不重寫
+ * 分析邏輯；這裡只是多一步「把結果講給使用者聽」。分析本身失敗（LLM 額度用完等）沿用
+ * analyzeCase() 既有的錯誤處理（跳既有的 #error-panel）——不刻意吞掉錯誤，跟手動點
+ * 「執行 Evidence Agent 預審」按鈕失敗時看到的是同一套行為，不是自動觸發就假裝沒事。
+ * 剛剛的 evidence 上傳／確認已經成功，不受這裡分析失敗與否影響。
+ */
+async function runAutoAnalysisInChat() {
+  const result = await analyzeCase();
+  if (result && result.report) {
+    const text = formatRiskReportForChat(result.report);
+    appendChatMessage({ role: 'ai', text });
+    pushChatHistory('assistant', text);
+  }
 }
 
 async function analyzeCase() {
@@ -1279,7 +2135,51 @@ function bindEvents() {
   document.querySelectorAll('.role-button').forEach((button) => {
     button.addEventListener('click', () => switchRole(button.dataset.role));
   });
+  $('dev-tools-toggle').addEventListener('click', () => {
+    setDevTools($('dev-tools-panel').hidden);
+  });
+  $('supplier-tools-toggle').addEventListener('click', () => {
+    setSupplierTools($('supplier-tools-panel').hidden);
+  });
+  $('manual-form-toggle').addEventListener('click', () => {
+    setManualForm($('manual-form-panel').hidden);
+  });
+  const settingsToggle = $('settings-toggle');
+  const settingsPanel = $('settings-panel');
+  const settingsScrim = $('settings-scrim');
+  function setSettingsPanel(open) {
+    settingsPanel.hidden = !open;
+    settingsScrim.classList.toggle('open', open);
+    settingsToggle.classList.toggle('open', open);
+    settingsToggle.setAttribute('aria-expanded', String(open));
+  }
+  settingsToggle.addEventListener('click', () => setSettingsPanel(settingsPanel.hidden));
+  settingsScrim.addEventListener('click', () => setSettingsPanel(false));
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && !settingsPanel.hidden) setSettingsPanel(false);
+  });
+  $('exec-view-switch').addEventListener('click', () => {
+    setExecView(!$('agent-view').hidden);
+  });
   $('evidence-form').addEventListener('submit', handleUpload);
+  $('chat-attach-btn').addEventListener('click', () => $('chat-file-input').click());
+  $('chat-file-input').addEventListener('change', (event) => handleChatFileSelect(event.target.files[0]));
+  $('chat-file-clear').addEventListener('click', () => {
+    chatAttachedFile = null;
+    renderChatFileChip();
+    $('chat-file-input').value = '';
+  });
+  $('chat-send-btn').addEventListener('click', sendChatUpload);
+  $('chat-text-input').addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault();
+      sendChatUpload();
+    }
+  });
+  $('evidence-drawer-toggle').addEventListener('click', () => {
+    setEvidenceDrawer(!$('evidence-drawer').classList.contains('open'));
+  });
+  $('evidence-drawer-scrim').addEventListener('click', () => setEvidenceDrawer(false));
   $('seed-evidence').addEventListener('click', seedEvidence);
   $('run-agent-analysis').addEventListener('click', analyzeCase);
   $('revalidate-trust').addEventListener('click', revalidateTrust);
@@ -1307,3 +2207,9 @@ function bindEvents() {
 
 bindEvents();
 switchRole('Supplier');
+showToast({
+  key: 'demo-disclaimer',
+  variant: 'info',
+  persistent: true,
+  message: 'Demo role，不是真實認證。READY_FOR_VERIFIER 只代表具備送交查驗準備條件，不代表正式查驗完成或官方核准。',
+});

@@ -27,6 +27,11 @@ const REQUIRED_EVIDENCE_TYPES = new Set([
   'production_report',
   'precursor_list',
 ]);
+// 即時預覽抽取只支援「真的能直接讀」的格式：圖片走 gpt-5-mini 的 image_url 直接讀圖，
+// 文字/JSON 走純文字 prompt。application/pdf 目前在這個 demo 裡其實是貼了標籤的純文字
+// 內容，不是真的二進位 PDF 解析——刻意不讓 preview 端點假裝支援，寧可明確拒絕、請使用者
+// 改貼文字或改傳截圖，也不要看起來「有在讀 PDF」其實沒有。
+const PREVIEW_MEDIA_TYPES = new Set(['image/png', 'image/jpeg', 'text/plain', 'application/json']);
 
 function isIsoDate(value) {
   if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
@@ -659,6 +664,87 @@ async function createEvidence(actor, body) {
   }
 }
 
+// 跟 public/js/case-workflow.js 的 REQUIRED_TYPE_LABELS 保持同一份對照——chatReply 要講
+// 「電費單」而不是回顯英文代碼 electricity_bill，使用者才看得懂。
+const REQUIRED_TYPE_LABELS_ZH = {
+  electricity_bill: '電費單',
+  fuel_ledger: '燃料紀錄',
+  production_report: '產量表',
+  precursor_list: '前驅物清單',
+};
+
+/**
+ * 給聊天框「情境 B：這不是文件，是在問問題」用的真實案件現況——只取 workflowStore 裡已經有
+ * 的資料組成一份摘要交給 LLM 當作 grounding，LLM 不會、也不需要自己編。抓不到案件或案件還
+ * 沒有任何分析紀錄都不算錯，就回傳「還缺全部」「沒有分析紀錄」的誠實現況。
+ */
+function buildChatCaseContext(caseId) {
+  const evidence = workflowStore.listEvidence(caseId) || [];
+  const presentTypes = [...new Set(evidence.map((item) => item.type))].filter((type) =>
+    REQUIRED_EVIDENCE_TYPES.has(type)
+  );
+  const missingTypes = [...REQUIRED_EVIDENCE_TYPES].filter((type) => !presentTypes.includes(type));
+  const toLabel = (type) => REQUIRED_TYPE_LABELS_ZH[type] || type;
+  const riskReport = workflowStore.getRiskReport(caseId);
+  return {
+    requiredLabels: [...REQUIRED_EVIDENCE_TYPES].map(toLabel),
+    presentLabels: presentTypes.map(toLabel),
+    missingLabels: missingTypes.map(toLabel),
+    openIssues: riskReport && riskReport.summary ? riskReport.summary.openIssues : [],
+  };
+}
+
+/**
+ * 上傳當下的即時抽取預覽（聊天式介面用，2026-08-26 隊長裁示落地）——只回傳候選欄位給前端
+ * 顯示成「AI 回覆」讓使用者確認，不寫入 workflowStore、不建立 evidence 紀錄。使用者確認
+ * 後前端另外呼叫既有 createEvidence 才是真的送出；這裡單純是「先看一眼 AI 讀到什麼」。
+ */
+async function previewEvidence(actor, body) {
+  const scope = requireCase(actor, body.caseId, 'Supplier');
+  if (scope.error) return scope.error;
+  try {
+    const filename = typeof body.filename === 'string' ? body.filename.trim() : '';
+    if (!filename || filename.length > 128 || filename.includes('/') || filename.includes('\\')) {
+      throw new WorkflowAdapterError('INVALID_FILENAME', 'filename 必須是 1–128 字元且不可包含路徑。', null);
+    }
+    const userNote = typeof body.userNote === 'string' ? body.userNote.trim().slice(0, 300) : '';
+    if (!PREVIEW_MEDIA_TYPES.has(body.mediaType)) {
+      throw new WorkflowAdapterError(
+        'MEDIA_TYPE_NOT_SUPPORTED_FOR_PREVIEW',
+        '即時預覽只支援 PNG/JPEG 圖片或純文字／JSON 內容；PDF 請改貼文字內容或改用截圖上傳。',
+        { supportedMediaTypes: [...PREVIEW_MEDIA_TYPES] }
+      );
+    }
+    const bytes = decodeBase64(body.contentBase64);
+    const isImage = body.mediaType.startsWith('image/');
+    const text = isImage ? undefined : new TextDecoder().decode(bytes);
+    const caseContext = buildChatCaseContext(body.caseId);
+    const { documentType, documentTypeConfidence, entries, chatReply, modelVersion, unsafeDropped } = await agentAdapter.previewExtraction({
+      filename,
+      mediaType: body.mediaType,
+      text,
+      imageBase64: isImage ? body.contentBase64 : undefined,
+      userNote: userNote || undefined,
+      caseContext,
+      chatHistory: Array.isArray(body.chatHistory) ? body.chatHistory : undefined,
+    });
+    audit(actor, 'EVIDENCE_PREVIEW_EXTRACT', 'evidence', filename, 'ALLOW', null, body.caseId, {
+      modelVersion,
+      documentType,
+      entryCount: entries.length,
+      isChatReply: Boolean(chatReply),
+    });
+    return ok(200, { documentType, documentTypeConfidence, entries, chatReply, modelVersion, unsafeDropped, demoOnly: true });
+  } catch (error) {
+    if (error instanceof agentAdapter.AgentAdapterError) {
+      const stable = agentAdapter.stableAgentError(error);
+      audit(actor, 'EVIDENCE_PREVIEW_EXTRACT', 'evidence', body.filename || null, 'ERROR', stable.code, body.caseId);
+      return fail(422, stable.code, stable.message, stable.details, stable.retryable);
+    }
+    return safeAdapterFailure(error);
+  }
+}
+
 function confirmEvidence(actor, evidenceId, body) {
   const item = workflowStore.getEvidence(evidenceId);
   const caseId = item ? item.caseId : body.caseId;
@@ -1088,6 +1174,10 @@ async function handleWorkflowApi(method, pathname, body = {}, context = {}) {
 
   if (method === 'POST' && pathname === '/api/evidence') {
     return createEvidence(actor, body);
+  }
+
+  if (method === 'POST' && pathname === '/api/evidence/preview') {
+    return previewEvidence(actor, body);
   }
 
   const confirmMatch = pathname.match(/^\/api\/evidence\/([^/]+)\/confirm$/);

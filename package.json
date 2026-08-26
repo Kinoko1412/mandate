@@ -30,6 +30,7 @@
     "wrangler": "^4.24.0"
   },
   "dependencies": {
+    "pdfjs-dist": "^4.10.38",
     "snarkjs": "^0.7.6"
   }
 }

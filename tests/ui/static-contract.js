@@ -83,8 +83,11 @@ check('root: 三角色與固定案件 hooks 存在', () => {
 });
 
 check('root: 信任邊界與 unavailable 文案存在', () => {
-  assert.ok(index.includes('Demo role，不是真實認證'));
-  assert.ok(index.includes('READY_FOR_VERIFIER 只代表具備送交查驗準備條件，不代表正式查驗完成或官方核准'));
+  // Demo-role 免責聲明 2026-08-26 從常駐橫幅改成右下角氣泡通知（showToast），
+  // 文案現在活在 case-workflow.js 裡（頁面載入時呼叫一次），不是 index.html 的靜態
+  // 標記——這裡改查 script 內容，斷言的意圖不變：這段文字一定要存在、不能被意外刪掉。
+  assert.ok(script.includes('Demo role，不是真實認證'));
+  assert.ok(script.includes('READY_FOR_VERIFIER 只代表具備送交查驗準備條件，不代表正式查驗完成或官方核准'));
   assert.ok(index.includes('尚未驗證'));
   assert.ok(index.includes('id="ready-disclaimer"'));
   assert.ok(!/CBAM Certified|Officially Approved|海關已核准/i.test(index));
