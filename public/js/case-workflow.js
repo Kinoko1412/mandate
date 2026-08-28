@@ -91,6 +91,16 @@ const ERROR_GUIDANCE = {
   INVALID_JSON: ['送出的資料格式無效。', '重新載入頁面後再試。'],
   INTERNAL_ERROR: ['伺服器暫時無法完成操作。', '稍後重試；若持續發生，檢查 server 狀態。'],
   NETWORK_UNAVAILABLE: ['無法連上本機 API。', '確認 npm start 正在執行，然後重新整理。'],
+  GOOGLE_OAUTH_NOT_CONFIGURED: ['伺服器尚未設定 Google OAuth 憑證。', '請聯絡負責部署的人設定 GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET。'],
+  GOOGLE_ORIGIN_UNKNOWN: ['無法判斷目前網址。', '重新整理頁面後再試一次。'],
+  GOOGLE_TOKEN_EXCHANGE_FAILED: ['Google 授權交換失敗。', '請重新點擊「連接 Google 帳號」再試一次。'],
+  GOOGLE_TOKEN_REFRESH_FAILED: ['Google 授權已失效。', '請重新連接 Google 帳號。'],
+  GOOGLE_NOT_CONNECTED: ['尚未連接 Google 帳號。', '點擊「連接 Google 帳號」完成授權後再試一次。'],
+  GOOGLE_REAUTH_REQUIRED: ['Google 授權已過期。', '請重新連接 Google 帳號。'],
+  GMAIL_SEND_FAILED: ['Gmail 寄送失敗。', '確認收件人格式正確，或稍後重試。'],
+  CALENDAR_EVENT_FAILED: ['Google 行事曆建立提醒失敗。', '稍後重試；若持續發生，重新連接 Google 帳號。'],
+  NO_MISSING_EVIDENCE: ['此案件目前沒有缺件。', '不需要補件通知。'],
+  INVALID_NOTIFICATION_PAYLOAD: ['通知內容不完整或格式錯誤。', '確認收件人 Email 與內容欄位皆已填寫。'],
 };
 
 const state = {
@@ -515,6 +525,173 @@ function checkStaleCaseNudge(caseRecord) {
   const text = `這個案件建立後已經 ${Math.floor(daysSince)} 天了，必要文件還缺 ${missingCount} 種，要不要現在補上？`;
   appendChatMessage({ role: 'ai', text });
   pushChatHistory('assistant', text);
+
+  const actions = document.createElement('div');
+  actions.className = 'ew-chat-ai-actions';
+  const draftBtn = document.createElement('button');
+  draftBtn.type = 'button';
+  draftBtn.className = 'button secondary';
+  draftBtn.textContent = '草擬補件通知（Email + 行事曆提醒）';
+  draftBtn.addEventListener('click', async () => {
+    draftBtn.disabled = true;
+    await requestNotificationDraft();
+  });
+  actions.appendChild(draftBtn);
+  appendChatMessage({ role: 'ai', node: actions });
+}
+
+/**
+ * Google OAuth 通知串接（2026-08-27 設計定案）——核心原則跟 commit_cbam_draft 的人審精神
+ * 一致：AI 只能「問」跟「草擬」，實際寄信/寫入行事曆一定要人類按下確認鈕才會發生。這裡是
+ * 前端那一半：草擬（呼叫 /api/cases/:id/notify/draft，純文字、不碰 Google）→ 顯示可編輯的
+ * 草稿 → 使用者按「確認寄出」/「確認建立提醒」才真的呼叫會動用 Google API 的端點。
+ */
+function buildGoogleConnectNode() {
+  const wrap = document.createElement('div');
+  const status = document.createElement('p');
+  status.className = 'ew-chat-ai-head';
+  status.textContent = '正在確認 Google 帳號連接狀態…';
+  wrap.appendChild(status);
+  (async () => {
+    let result;
+    try {
+      result = await api('/api/notify/google/status');
+    } catch {
+      status.textContent = '無法確認 Google 帳號連接狀態，請稍後再試。';
+      return;
+    }
+    if (result.connected) {
+      status.textContent = `✅ Google 帳號已連接（${new Date(result.connectedAt).toLocaleString('zh-TW')}），可以確認寄出。`;
+      return;
+    }
+    status.textContent = '⚠ 尚未連接 Google 帳號，需要先連接才能真的寄出 Email／建立行事曆提醒。';
+    const connectBtn = document.createElement('button');
+    connectBtn.type = 'button';
+    connectBtn.className = 'button secondary';
+    connectBtn.textContent = '連接 Google 帳號';
+    connectBtn.addEventListener('click', async () => {
+      const auth = await runAction(() => api('/api/oauth/google/authorize'));
+      if (auth && auth.authorizeUrl) window.location.href = auth.authorizeUrl;
+    });
+    wrap.appendChild(connectBtn);
+  })();
+  return wrap;
+}
+
+function buildNotificationDraftNode(draft) {
+  const wrap = document.createElement('div');
+
+  const head = document.createElement('p');
+  head.className = 'ew-chat-ai-head';
+  head.textContent = `已草擬補件通知：缺「${draft.missingLabels.join('、')}」。以下內容由 AI 草擬，確認前可自行修改。`;
+  wrap.appendChild(head);
+  wrap.appendChild(buildGoogleConnectNode());
+
+  const toLabel = document.createElement('label');
+  toLabel.className = 'ew-chat-ai-head';
+  toLabel.textContent = '收件人 Email：';
+  toLabel.style.display = 'block';
+  const toInput = document.createElement('input');
+  toInput.type = 'email';
+  toInput.placeholder = 'supplier@example.com';
+  toInput.style.width = '100%';
+  toInput.style.boxSizing = 'border-box';
+  toLabel.appendChild(toInput);
+  wrap.appendChild(toLabel);
+
+  const subjectInput = document.createElement('input');
+  subjectInput.type = 'text';
+  subjectInput.value = draft.email.subject;
+  subjectInput.style.width = '100%';
+  subjectInput.style.boxSizing = 'border-box';
+  wrap.appendChild(subjectInput);
+
+  const bodyTextarea = document.createElement('textarea');
+  bodyTextarea.value = draft.email.bodyText;
+  bodyTextarea.rows = 6;
+  bodyTextarea.style.width = '100%';
+  bodyTextarea.style.boxSizing = 'border-box';
+  wrap.appendChild(bodyTextarea);
+
+  const emailActions = document.createElement('div');
+  emailActions.className = 'ew-chat-ai-actions';
+  const sendBtn = document.createElement('button');
+  sendBtn.type = 'button';
+  sendBtn.className = 'button';
+  sendBtn.textContent = '確認寄出 Email';
+  emailActions.appendChild(sendBtn);
+  wrap.appendChild(emailActions);
+
+  sendBtn.addEventListener('click', async () => {
+    const to = toInput.value.trim();
+    if (!to) {
+      showError({ code: 'INVALID_NOTIFICATION_PAYLOAD', message: '請先填寫收件人 Email。' });
+      return;
+    }
+    const result = await runAction(
+      () =>
+        api(`/api/cases/${CASE_ID}/notify/email`, {
+          method: 'POST',
+          body: { confirm: true, to, subject: subjectInput.value, bodyText: bodyTextarea.value },
+        }),
+      'Email 已寄出。'
+    );
+    if (result) {
+      emailActions.replaceChildren();
+      const done = document.createElement('p');
+      done.className = 'ew-chat-ai-head';
+      done.textContent = `已寄出給 ${to}。`;
+      wrap.appendChild(done);
+    }
+  });
+
+  const reminderAt = new Date(draft.calendarReminder.startIso);
+  const calHead = document.createElement('p');
+  calHead.className = 'ew-chat-ai-head';
+  calHead.textContent = `行事曆提醒草稿：${draft.calendarReminder.summary}（${reminderAt.toLocaleString('zh-TW')}）`;
+  wrap.appendChild(calHead);
+
+  const calActions = document.createElement('div');
+  calActions.className = 'ew-chat-ai-actions';
+  const calBtn = document.createElement('button');
+  calBtn.type = 'button';
+  calBtn.className = 'button secondary';
+  calBtn.textContent = '確認建立行事曆提醒';
+  calActions.appendChild(calBtn);
+  wrap.appendChild(calActions);
+
+  calBtn.addEventListener('click', async () => {
+    const result = await runAction(
+      () =>
+        api(`/api/cases/${CASE_ID}/notify/calendar`, {
+          method: 'POST',
+          body: {
+            confirm: true,
+            summary: draft.calendarReminder.summary,
+            description: draft.calendarReminder.description,
+            startIso: draft.calendarReminder.startIso,
+            endIso: draft.calendarReminder.endIso,
+          },
+        }),
+      '行事曆提醒已建立。'
+    );
+    if (result) {
+      calActions.replaceChildren();
+      const done = document.createElement('p');
+      done.className = 'ew-chat-ai-head';
+      done.textContent = '已加進 Google 行事曆。';
+      wrap.appendChild(done);
+    }
+  });
+
+  return wrap;
+}
+
+async function requestNotificationDraft() {
+  const draft = await runAction(() => api(`/api/cases/${CASE_ID}/notify/draft`, { method: 'POST' }));
+  if (!draft) return;
+  appendChatMessage({ role: 'ai', node: buildNotificationDraftNode(draft) });
+  pushChatHistory('assistant', `已草擬補件通知（缺 ${draft.missingLabels.join('、')}），等待使用者確認寄出。`);
 }
 
 /**
@@ -1353,50 +1530,124 @@ function appendChatMessage({ role, text, node }) {
   return bubble;
 }
 
-async function handleChatFileSelect(file) {
-  if (!file) return;
+/**
+ * 驗證＋讀檔的共用邏輯，從 handleChatFileSelect 抽出來給單檔（附加到輸入框，
+ * 等使用者按送出）跟多檔（選取後直接平行送進各自的預覽）兩條路徑共用。錯誤訊息
+ * 直接帶檔名，避免多檔情境下使用者搞不清楚是哪一份失敗。回傳 null 代表這份檔案
+ * 不能用，訊息已經印在聊天記錄裡，呼叫端不用再重複處理。
+ */
+async function prepareChatFile(file) {
+  if (!file) return null;
   if (file.type === 'application/pdf') {
     if (file.size > 8 * 1024 * 1024) {
-      appendChatMessage({ role: 'ai', text: 'PDF 超過 8 MB 上限，請改用較小的檔案。' });
-      $('chat-file-input').value = '';
-      return;
+      appendChatMessage({ role: 'ai', text: `「${file.name}」PDF 超過 8 MB 上限，請改用較小的檔案。` });
+      return null;
     }
-    const thinking = appendChatMessage({ role: 'ai', text: '正在把 PDF 第一頁轉成圖片…' });
+    const thinking = appendChatMessage({ role: 'ai', text: `正在把「${file.name}」第一頁轉成圖片…` });
     try {
       const base64 = await convertPdfFirstPageToPng(file);
       if (thinking) thinking.remove();
       appendChatMessage({ role: 'ai', text: `已把「${file.name}」第一頁轉成圖片準備讀取；只會讀第一頁，多頁 PDF 請分開上傳每一頁的截圖。` });
-      chatAttachedFile = {
+      return {
         name: file.name.replace(/\.pdf$/i, '') + '-p1.png',
         safeName: makeSafeChatFilename('image/png'),
         mediaType: 'image/png',
         base64,
       };
-      renderChatFileChip();
     } catch (err) {
       if (thinking) thinking.remove();
-      appendChatMessage({ role: 'ai', text: 'PDF 轉換失敗（可能是掃描檔或格式特殊），請改用截圖／照片上傳，或直接貼上文字內容。' });
+      appendChatMessage({ role: 'ai', text: `「${file.name}」PDF 轉換失敗（可能是掃描檔或格式特殊），請改用截圖／照片上傳，或直接貼上文字內容。` });
+      return null;
     }
-    $('chat-file-input').value = '';
-    return;
   }
   if (file.type !== 'image/png' && file.type !== 'image/jpeg') {
-    appendChatMessage({ role: 'ai', text: `不支援 ${file.type || '這種'} 格式，請改用 PNG／JPEG／PDF，或直接貼上文字內容。` });
-    $('chat-file-input').value = '';
-    return;
+    appendChatMessage({ role: 'ai', text: `「${file.name}」不支援 ${file.type || '這種'} 格式，請改用 PNG／JPEG／PDF，或直接貼上文字內容。` });
+    return null;
   }
   if (file.size > 512 * 1024) {
-    appendChatMessage({ role: 'ai', text: '檔案超過 512 KB 上限，請改用較小的檔案。' });
-    $('chat-file-input').value = '';
-    return;
+    appendChatMessage({ role: 'ai', text: `「${file.name}」超過 512 KB 上限，請改用較小的檔案。` });
+    return null;
   }
-  chatAttachedFile = {
+  return {
     name: file.name,
     safeName: makeSafeChatFilename(file.type),
     mediaType: file.type,
     base64: await readFileAsBase64(file),
   };
+}
+
+async function handleChatFileSelect(file) {
+  const prepared = await prepareChatFile(file);
+  $('chat-file-input').value = '';
+  if (!prepared) return;
+  chatAttachedFile = prepared;
   renderChatFileChip();
+}
+
+/**
+ * 多檔選取（例如一次選 4 份必要文件）：每份各自獨立準備、獨立呼叫一次
+ * /api/evidence/preview（各自獨立的 LLM 呼叫，不共用 context，跟 services/agent 既有
+ * 的信任設計一致），用 Promise.allSettled 平行送出，不互相等待——A 檔案給 LLM 處理的
+ * 同時 B 檔案就已經送出去了，不用排隊等前一份做完。每份都各自出現一則聊天訊息＋各自的
+ * 「確認並送出／不對，捨棄」，人工確認的把關完全沒被跳過，只是把「附加→送出」這個手動
+ * 動作從 4 次縮成 1 次選取。單一檔案時維持原本「附加到輸入框，可以加一句說明再送出」的
+ * 流程，不強制走這條路徑。
+ */
+async function handleChatFilesSelect(fileList) {
+  const files = Array.from(fileList || []);
+  if (!files.length) return;
+  if (files.length === 1) {
+    await handleChatFileSelect(files[0]);
+    return;
+  }
+  $('chat-file-input').value = '';
+  await Promise.allSettled(files.map((file) => previewOneFile(file)));
+}
+
+/**
+ * 每份檔案各自獨立顯示狀態（排隊中→讀取/上傳中→完成或失敗），不是丟進去之後
+ * 靜靜等結果——多檔平行送出時，使用者要看得出「這份卡在哪一步」，而不是只有
+ * 送出前跟收到結果兩個時間點。狀態訊息用完即移除，不留殘影堆在對話紀錄裡。
+ */
+async function previewOneFile(file) {
+  const queued = appendChatMessage({ role: 'ai', text: `📎 ${file.name}：排隊中…` });
+  const prepared = await prepareChatFile(file);
+  if (queued) queued.remove();
+  if (!prepared) return;
+  const meta = {
+    filename: prepared.safeName,
+    displayName: prepared.name,
+    mediaType: prepared.mediaType,
+    contentBase64: prepared.base64,
+  };
+  appendChatMessage({ role: 'user', text: `📎 ${meta.displayName}` });
+  pushChatHistory('user', `[附加檔案：${meta.displayName}]`);
+  const processing = appendChatMessage({ role: 'ai', text: `${meta.displayName}：上傳中，AI 讀取中…` });
+  const result = await runAction(
+    () =>
+      api('/api/evidence/preview', {
+        method: 'POST',
+        role: 'Supplier',
+        body: {
+          caseId: CASE_ID,
+          filename: meta.filename,
+          mediaType: meta.mediaType,
+          contentBase64: meta.contentBase64,
+          chatHistory: chatHistoryLog,
+        },
+      }),
+    null,
+    (error) => {
+      if (processing) processing.remove();
+      const presentation = errorPresentation(error);
+      appendChatMessage({ role: 'ai', text: `${meta.displayName}：上傳失敗——${presentation.reason || '暫時無法讀取這份文件。'}` });
+    }
+  );
+  if (result) {
+    if (processing) processing.remove();
+    appendChatMessage({ role: 'ai', node: buildEntryPreviewNode(result, meta) });
+    pushChatHistory('assistant', summarizeResultForHistory(result));
+  }
 }
 
 function buildEntryPreviewNode(result, meta) {
@@ -2163,7 +2414,7 @@ function bindEvents() {
   });
   $('evidence-form').addEventListener('submit', handleUpload);
   $('chat-attach-btn').addEventListener('click', () => $('chat-file-input').click());
-  $('chat-file-input').addEventListener('change', (event) => handleChatFileSelect(event.target.files[0]));
+  $('chat-file-input').addEventListener('change', (event) => handleChatFilesSelect(event.target.files));
   $('chat-file-clear').addEventListener('click', () => {
     chatAttachedFile = null;
     renderChatFileChip();
@@ -2213,3 +2464,23 @@ showToast({
   persistent: true,
   message: 'Demo role，不是真實認證。READY_FOR_VERIFIER 只代表具備送交查驗準備條件，不代表正式查驗完成或官方核准。',
 });
+
+/** Google OAuth 授權完成後，Google 會把瀏覽器導回這個網址並帶上 ?googleOauth=connected
+ * 或 ?googleOauth=error&reason=...（見 server/apiFetch.js 對 /api/oauth/google/callback
+ * 的特別處理）。這裡在聊天視窗裡回報結果，並把這兩個查詢參數從網址列清掉，避免使用者
+ * 重新整理頁面時重複觸發。 */
+(function handleGoogleOAuthRedirect() {
+  const params = new URLSearchParams(window.location.search);
+  const status = params.get('googleOauth');
+  if (!status) return;
+  if (status === 'connected') {
+    appendChatMessage({ role: 'ai', text: '✅ Google 帳號已連接，之後可以確認寄出補件通知或建立行事曆提醒。' });
+  } else {
+    const reason = params.get('reason') || 'unknown';
+    appendChatMessage({ role: 'ai', text: `⚠ Google 帳號連接失敗（${reason}），請重新點擊「連接 Google 帳號」再試一次。` });
+  }
+  params.delete('googleOauth');
+  params.delete('reason');
+  const rest = params.toString();
+  window.history.replaceState({}, '', window.location.pathname + (rest ? `?${rest}` : ''));
+})();
