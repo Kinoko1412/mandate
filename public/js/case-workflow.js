@@ -1585,6 +1585,38 @@ async function handleChatFileSelect(file) {
 }
 
 /**
+ * 讓 #chat-drop-zone（整個「上傳文件」卡片）接受從桌面/檔案總管直接拖進來的檔案，
+ * 不是只能靠迴紋針點開系統選檔視窗。瀏覽器預設行為是「放開就用瀏覽器開啟這個檔案」，
+ * 三個事件都要 preventDefault 才擋得掉。dragenter/dragleave 會在子元素間進出時各自觸發，
+ * 用一個計數器而不是布林值，避免滑鼠移過內部元素時外框高亮閃爍或提早消失。
+ */
+function bindChatDropZone() {
+  const zone = $('chat-drop-zone');
+  if (!zone) return;
+  let dragDepth = 0;
+  zone.addEventListener('dragenter', (event) => {
+    event.preventDefault();
+    dragDepth += 1;
+    zone.classList.add('ew-hero--drag-over');
+  });
+  zone.addEventListener('dragover', (event) => {
+    event.preventDefault();
+  });
+  zone.addEventListener('dragleave', (event) => {
+    event.preventDefault();
+    dragDepth = Math.max(0, dragDepth - 1);
+    if (dragDepth === 0) zone.classList.remove('ew-hero--drag-over');
+  });
+  zone.addEventListener('drop', (event) => {
+    event.preventDefault();
+    dragDepth = 0;
+    zone.classList.remove('ew-hero--drag-over');
+    const files = event.dataTransfer && event.dataTransfer.files;
+    if (files && files.length) handleChatFilesSelect(files);
+  });
+}
+
+/**
  * 多檔選取（例如一次選 4 份必要文件）：每份各自獨立準備、獨立呼叫一次
  * /api/evidence/preview（各自獨立的 LLM 呼叫，不共用 context，跟 services/agent 既有
  * 的信任設計一致），用 Promise.allSettled 平行送出，不互相等待——A 檔案給 LLM 處理的
@@ -2415,6 +2447,7 @@ function bindEvents() {
   $('evidence-form').addEventListener('submit', handleUpload);
   $('chat-attach-btn').addEventListener('click', () => $('chat-file-input').click());
   $('chat-file-input').addEventListener('change', (event) => handleChatFilesSelect(event.target.files));
+  bindChatDropZone();
   $('chat-file-clear').addEventListener('click', () => {
     chatAttachedFile = null;
     renderChatFileChip();

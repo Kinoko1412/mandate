@@ -69,6 +69,13 @@
 .ew-hero {
   padding: clamp(20px, 6vh, 56px) 0 clamp(20px, 4vh, 32px);
   text-align: center;
+  border: 2px dashed transparent;
+  border-radius: var(--space-2, 8px);
+  transition: border-color var(--ease, 0.15s), background-color var(--ease, 0.15s);
+}
+.ew-hero--drag-over {
+  border-color: var(--brand);
+  background-color: color-mix(in srgb, var(--brand) 8%, transparent);
 }
 .ew-hero-title {
   margin: 0;
