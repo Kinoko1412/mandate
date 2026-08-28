@@ -205,6 +205,38 @@
   cursor: pointer;
 }
 .ew-lightbox-close:hover { background: rgba(255, 255, 255, 0.3); }
+
+.trust-check-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12.5px;
+}
+.trust-check-list li {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 4px 8px;
+  border-radius: 6px;
+}
+.trust-check-list li.pass { background: rgba(34, 139, 87, 0.08); }
+.trust-check-list li.fail { background: rgba(200, 60, 60, 0.1); }
+.trust-check-list li.skipped { background: rgba(0, 0, 0, 0.04); }
+.trust-check-list .status {
+  font-weight: 700;
+  text-transform: uppercase;
+  font-size: 10.5px;
+  min-width: 52px;
+}
+.trust-check-list li.pass .status { color: #1f7a4d; }
+.trust-check-list li.fail .status { color: #b3261e; }
+.trust-check-list li.skipped .status { color: var(--ink-muted); }
+.trust-check-list .name { font-weight: 700; font-family: var(--font-body); }
+.trust-check-list .detail { color: var(--ink-muted); }
+.trust-check-list li.highlight { outline: 2px solid var(--brand); }
 /* Seamless pill composer — Claude/Gemini-homepage style: no border, no fill
    distinct from the page beyond a soft shadow for depth, so it reads as
    "resting on the page" rather than a boxed form panel. */

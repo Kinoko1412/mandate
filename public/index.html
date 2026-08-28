@@ -257,6 +257,12 @@
           <button id="revalidate-trust" class="button" type="button">重驗 Proof / Gate</button>
         </div>
 
+        <section class="panel risk-panel" aria-labelledby="trust-proof-title">
+          <h3 id="trust-proof-title">Proof / Gate 驗證明細</h3>
+          <p class="privacy-note">按「重驗 Proof / Gate」後列出實際跑過的每一項檢查，含 real_zk_proof（真實 zk-SNARK 電路）。</p>
+          <div id="trust-proof-checks" aria-live="polite">尚未重驗。</div>
+        </section>
+
         <div id="installation-cards" class="metric-grid" aria-live="polite"></div>
 
         <section class="panel risk-panel" aria-labelledby="supplier-risk-title">

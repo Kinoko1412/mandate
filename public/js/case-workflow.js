@@ -2130,6 +2130,44 @@ async function analyzeCase() {
   return result;
 }
 
+/**
+ * 「重驗 Proof / Gate」實際做的事不只是 demoOnly commitment——正式 evaluator
+ * （productionEvaluator → evaluateTrustScenarioLive）額外疊加了真的 zk-SNARK 電路驗證
+ * （real_zk_proof）跟 vLEI 身份鏈驗證（vlei_identity），但畫面上一直沒有地方讓使用者
+ * 看到這兩項真的跑過、真的通過——只有一句籠統的「已驗證」。這裡把 proof.checks
+ * 整份印出來，real_zk_proof／vlei_identity 特別標起來，錄 Demo 影片時可以直接停格
+ * 讓評審看到「real_zk_proof pass」不是嘴上說說。
+ */
+function renderTrustProofChecks(checks) {
+  const target = $('trust-proof-checks');
+  if (!target) return;
+  target.replaceChildren();
+  if (!Array.isArray(checks) || !checks.length) {
+    target.textContent = '這次重驗沒有回傳檢查明細。';
+    return;
+  }
+  const list = document.createElement('ul');
+  list.className = 'trust-check-list';
+  const highlightNames = new Set(['real_zk_proof', 'vlei_identity']);
+  checks.forEach((check) => {
+    const li = document.createElement('li');
+    li.className = check.status || 'skipped';
+    if (highlightNames.has(check.name)) li.classList.add('highlight');
+    const status = document.createElement('span');
+    status.className = 'status';
+    status.textContent = check.status || '—';
+    const name = document.createElement('span');
+    name.className = 'name';
+    name.textContent = check.name;
+    const detail = document.createElement('span');
+    detail.className = 'detail';
+    detail.textContent = check.detail || '';
+    li.append(status, name, detail);
+    list.appendChild(li);
+  });
+  target.appendChild(list);
+}
+
 async function revalidateTrust() {
   const result = await runAction(
     () => api('/api/workflow/revalidate', {
@@ -2140,6 +2178,7 @@ async function revalidateTrust() {
   );
   if (!result) return null;
   await runAction(loadRole);
+  renderTrustProofChecks(result.case && result.case.services && result.case.services.proof && result.case.services.proof.checks);
   const codes = result.readiness.reasonCodes || [];
   showNotice(
     result.readiness.status === 'READY_FOR_VERIFIER'
