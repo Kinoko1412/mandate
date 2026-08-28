@@ -1640,6 +1640,18 @@ async function handleChatFilesSelect(fileList) {
  * 每份檔案各自獨立顯示狀態（排隊中→讀取/上傳中→完成或失敗），不是丟進去之後
  * 靜靜等結果——多檔平行送出時，使用者要看得出「這份卡在哪一步」，而不是只有
  * 送出前跟收到結果兩個時間點。狀態訊息用完即移除，不留殘影堆在對話紀錄裡。
+ *
+ * 刻意不用共用的 runAction()：那支會操作單一、全站共用的忙碌游標跟頂部錯誤面板，
+ * 平行跑好幾份檔案時，誰先失敗就搶走那個共用面板，跟「每份各自獨立顯示狀態」
+ * 的設計互相打架，2026-08-28 在正式站上就親眼看到「頂部紅色錯誤框」跟「這則
+ * 訊息自己的上傳失敗文字」同時出現、講同一件事的重複畫面。這裡改成直接呼叫
+ * api()、自己 try/catch，錯誤只留在這份檔案自己的訊息裡，不去動全站共用狀態。
+ *
+ * 失敗自動重試一次（短暫延遲後）：同一天在正式站上實測平行上傳 4 份檔案時，
+ * 其中一份曾經在自己的環境正常、隔壁請求都成功的狀況下單獨回過一次
+ * AGENT_ANALYSIS_FAILED，後續用同一份檔案重打 20 次都沒能再複現，判斷是 LLM
+ * 供應商端偶發的短暫延遲/限流，不是平行處理邏輯本身的問題——加一次重試换取
+ * 這種瞬斷不會直接讓錄影卡住，不做第二次重試是避免真正故障時使用者等太久。
  */
 async function previewOneFile(file) {
   const queued = appendChatMessage({ role: 'ai', text: `📎 ${file.name}：排隊中…` });
@@ -1655,30 +1667,42 @@ async function previewOneFile(file) {
   appendChatMessage({ role: 'user', text: `📎 ${meta.displayName}` });
   pushChatHistory('user', `[附加檔案：${meta.displayName}]`);
   const processing = appendChatMessage({ role: 'ai', text: `${meta.displayName}：上傳中，AI 讀取中…` });
-  const result = await runAction(
-    () =>
-      api('/api/evidence/preview', {
-        method: 'POST',
-        role: 'Supplier',
-        body: {
-          caseId: CASE_ID,
-          filename: meta.filename,
-          mediaType: meta.mediaType,
-          contentBase64: meta.contentBase64,
-          chatHistory: chatHistoryLog,
-        },
-      }),
-    null,
-    (error) => {
-      if (processing) processing.remove();
-      const presentation = errorPresentation(error);
-      appendChatMessage({ role: 'ai', text: `${meta.displayName}：上傳失敗——${presentation.reason || '暫時無法讀取這份文件。'}` });
+
+  const callPreview = () =>
+    api('/api/evidence/preview', {
+      method: 'POST',
+      role: 'Supplier',
+      body: {
+        caseId: CASE_ID,
+        filename: meta.filename,
+        mediaType: meta.mediaType,
+        contentBase64: meta.contentBase64,
+        chatHistory: chatHistoryLog,
+      },
+    });
+
+  let result = null;
+  let lastError = null;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      result = await callPreview();
+      break;
+    } catch (error) {
+      lastError = error;
+      if (attempt === 0) {
+        if (processing) processing.textContent = `${meta.displayName}：暫時失敗，重試中…`;
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+      }
     }
-  );
+  }
+
+  if (processing) processing.remove();
   if (result) {
-    if (processing) processing.remove();
     appendChatMessage({ role: 'ai', node: buildEntryPreviewNode(result, meta) });
     pushChatHistory('assistant', summarizeResultForHistory(result));
+  } else {
+    const presentation = errorPresentation(lastError);
+    appendChatMessage({ role: 'ai', text: `${meta.displayName}：上傳失敗——${presentation.reason || '暫時無法讀取這份文件。'}` });
   }
 }
 
