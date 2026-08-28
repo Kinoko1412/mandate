@@ -11,8 +11,14 @@ const PROMPT_VERSION = 'evidence-risk-contract-v1';
 const MAX_ENTRIES_PER_EVIDENCE = 100;
 const MAX_ENTRIES_PER_CASE = 250;
 const MAX_CITATIONS_PER_CASE = 250;
+// 刻意只比對「完整的注入語句／片語」，不比對 pass／deny／submit／提交這類單獨常見字——
+// 這些字在一般業務文件、甚至 Evidence Agent 自己生成的客套回覆裡都會自然出現（例如
+// 「我不能執行或提交任何操作」），命中就整份丟棄的話會造成大量假陽性，2026-08-28 發現
+// AI 自己上一輪的回覆內容經 sanitizeChatHistory 重新掃描時觸發了這道防線，把自己下一輪
+// 反鎖。收斂成片語後，真正的注入攻擊（見 tests/agent/smoke.js／tests/workflow/smoke.js
+// 的攻擊矩陣）仍然全部命中，因為那些測試字串都帶著這裡列的完整片語。
 const INJECTION_PATTERN =
-  /ignore\s+previous\s+instructions|mark\s+pass|\bpass\b|\bdeny\b|cbam\s+certified|officially\s+approved|decrypt|submit|system\s+prompt|忽略(?:先前|之前|規則)|直接放行|解密|提交/iu;
+  /ignore\s+previous\s+instructions|mark\s+pass|cbam\s+certified|officially\s+approved|decrypt|system\s+prompt|忽略(?:先前|之前|規則)|直接放行|解密/iu;
 const SAFE_FIELD = /^[A-Za-z][A-Za-z0-9_.-]{0,63}$/;
 const SAFE_UNIT = /^[A-Za-z0-9%/_. -]{1,24}$/;
 const SAFE_SOURCE_FILE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
