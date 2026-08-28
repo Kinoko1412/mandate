@@ -233,11 +233,18 @@ function clearMessages() {
   $('error-panel').hidden = true;
 }
 
+/**
+ * #notice 在畫面最上方（dev-tools 面板底下，SUPPLIER WORKSPACE 之前）。.focus()
+ * 預設會把該元素捲進可視範圍，2026-08-28 實測發現：每次「確認並送出」成功都會呼叫
+ * 這裡，畫面因此每次都被硬拉回最上面，使用者在下面滑到一半的地方操作，一按確認就
+ * 整頁跳走。screen reader 需要的 focus 通知還是要做（不然 aria-live 使用者會漏掉這則
+ * 訊息），但不該連帶劫持視覺捲動位置，所以加 preventScroll。
+ */
 function showNotice(message) {
   $('notice').textContent = message;
   $('notice').hidden = false;
   $('notice').tabIndex = -1;
-  $('notice').focus();
+  $('notice').focus({ preventScroll: true });
 }
 
 function errorPresentation(error) {
@@ -267,7 +274,7 @@ function showError(error) {
   $('error-code').textContent = `reason code: ${presentation.code}`;
   $('error-next').textContent = `下一步：${presentation.next}`;
   $('error-panel').hidden = false;
-  $('error-panel').focus();
+  $('error-panel').focus({ preventScroll: true });
 }
 
 function metric(label, value, note = '') {
