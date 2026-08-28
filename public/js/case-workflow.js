@@ -1713,6 +1713,35 @@ async function previewOneFile(file) {
   }
 }
 
+function openLightbox(dataUrl) {
+  $('chat-lightbox-img').src = dataUrl;
+  $('chat-lightbox').hidden = false;
+}
+function closeLightbox() {
+  $('chat-lightbox').hidden = true;
+  $('chat-lightbox-img').src = '';
+}
+
+/**
+ * 上傳文件的縮圖，插在「看起來是XX，已擷取N筆欄位」那句話跟欄位清單之間——使用者
+ * 才能對照「AI 讀出來的內容」跟「原始文件長怎樣」，肉眼判斷 AI 有沒有看錯，不用
+ * 只憑信心度數字盲目相信。純文字貼上的內容沒有圖可看，跳過不顯示縮圖。
+ */
+function buildImageThumb(meta) {
+  if (!meta.mediaType || !meta.mediaType.startsWith('image/')) return null;
+  const dataUrl = `data:${meta.mediaType};base64,${meta.contentBase64}`;
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'ew-chat-thumb-btn';
+  btn.setAttribute('aria-label', `放大檢視 ${meta.displayName || '上傳的文件'}`);
+  const img = document.createElement('img');
+  img.src = dataUrl;
+  img.alt = meta.displayName || '上傳的文件預覽';
+  btn.appendChild(img);
+  btn.addEventListener('click', () => openLightbox(dataUrl));
+  return btn;
+}
+
 function buildEntryPreviewNode(result, meta) {
   const wrap = document.createElement('div');
   const entries = result.entries || [];
@@ -1753,6 +1782,8 @@ function buildEntryPreviewNode(result, meta) {
     ? `看起來是「${typeLabel}」，已擷取 ${entries.length} 筆欄位：`
     : `看起來是「${typeLabel}」，但沒有擷取到任何結構化欄位，可以改用下方手動輸入表單。`;
   wrap.appendChild(head);
+  const thumb = buildImageThumb(meta);
+  if (thumb) wrap.appendChild(thumb);
 
   if (entries.length) {
     const list = document.createElement('ul');
@@ -2479,6 +2510,13 @@ function bindEvents() {
   $('chat-attach-btn').addEventListener('click', () => $('chat-file-input').click());
   $('chat-file-input').addEventListener('change', (event) => handleChatFilesSelect(event.target.files));
   bindChatDropZone();
+  $('chat-lightbox-close').addEventListener('click', closeLightbox);
+  $('chat-lightbox').addEventListener('click', (event) => {
+    if (event.target.id === 'chat-lightbox') closeLightbox();
+  });
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && !$('chat-lightbox').hidden) closeLightbox();
+  });
   $('chat-file-clear').addEventListener('click', () => {
     chatAttachedFile = null;
     renderChatFileChip();
