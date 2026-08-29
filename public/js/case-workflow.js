@@ -1074,7 +1074,7 @@ function showToast(opts) {
     actionButton.textContent = '查看詳情';
     actionButton.addEventListener('click', () => {
       dismiss();
-      setEvidenceDrawer(true);
+      (opts.onAction || (() => setEvidenceDrawer(true)))();
     });
     actions.append(actionButton);
     body.append(actions);
@@ -2195,6 +2195,30 @@ async function runAutoAnalysisInChat() {
   }
 }
 
+/**
+ * 2026-08-29：Evidence Agent 分析結果原本只寫進畫面最下面「顯示案件資訊與進階工具」
+ * 展開後的技術表格裡——實測過缺期偵測(EVIDENCE_PERIOD_INCOMPLETE)其實有正確判斷出來，
+ * 但要往下捲一大段才看得到，錄影時沒辦法讓評審一眼看懂 AI 標出了異常。這裡把
+ * missingEvidence／discrepancies 摘要成一顆紅色 toast 氣泡（跟既有上傳失敗用的是同一套
+ * showToast()，預設 variant 就是紅色），跳在畫面右下角，不用另外往下找。
+ */
+function buildAnalysisAlertLines(report) {
+  const lines = [];
+  (report.missingEvidence || []).forEach((item) => {
+    const label = REQUIRED_TYPE_LABELS[item.requiredEvidence] || item.requiredEvidence;
+    lines.push(
+      item.coveredPeriod
+        ? `${label} 缺期間：${item.missingPeriod}`
+        : `${label} 尚未上傳`
+    );
+  });
+  (report.discrepancies || []).forEach((d) => {
+    const label = DISCREPANCY_LABELS[d.ruleId] || d.ruleId;
+    lines.push(`${label}比率超出 Demo 預期範圍，需人工核對`);
+  });
+  return lines;
+}
+
 async function analyzeCase() {
   const result = await runAction(() => api(`/api/cases/${CASE_ID}/agent/analyze`, {
     method: 'POST',
@@ -2207,6 +2231,22 @@ async function analyzeCase() {
         ? `Evidence Agent 預審已完成（LLM 不可用，已退回規則引擎：${result.fallbackReason || '未知原因'}）；這是衍生風險報告，不參與 Gate。`
         : 'Evidence Agent 預審已完成（LLM）；這是衍生風險報告，不參與 Gate。'
     );
+    if (result.report) {
+      const alertLines = buildAnalysisAlertLines(result.report);
+      if (alertLines.length) {
+        showToast({
+          title: `Evidence Agent 發現 ${alertLines.length} 項異常`,
+          message: alertLines.slice(0, 3).join('；') + (alertLines.length > 3 ? `；等 ${alertLines.length} 項` : ''),
+          // 「查看詳情」預設是開檔案抽屜，這裡改成直接展開案件資訊與進階工具面板並捲過去
+          // ——那裡才是 RiskReport 完整內容（findings/missingEvidence/discrepancies）
+          // 真正所在的地方，開檔案抽屜對這則通知來說文不對題。
+          onAction: () => {
+            setSupplierTools(true);
+            $('supplier-tools-panel').scrollIntoView({ behavior: 'smooth', block: 'start' });
+          },
+        });
+      }
+    }
     await runAction(loadRole);
   }
   return result;
