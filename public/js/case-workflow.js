@@ -1424,6 +1424,7 @@ async function uploadEvidence(input) {
         coveredTo: input.coveredTo,
         source: input.source,
       },
+      ...(input.entries ? { entries: input.entries } : {}),
       ...vaultFields,
     },
   });
@@ -1809,24 +1810,99 @@ function buildEntryPreviewNode(result, meta, batch) {
   const thumb = buildImageThumb(meta);
   if (thumb) wrap.appendChild(thumb);
 
+  // 2026-08-29：AI 讀錯不是假設，是實測出來的——同一張帳單重複上傳兩次，其中一個數字
+  // 一次被標成「用電天數」、一次被標成「這期用電度數 kWh」，信心度兩次都還是 70%，完全
+  // 沒反映出兩次結果互相矛盾。這個工具的賣點之一是幫使用者抓缺件/資料異常，AI 讀錯又沒
+  // 有人工修正空間的話這個賣點就站不住，所以欄位名稱/數值/單位在「確認並送出」之前都
+  // 可以直接編輯，取代 AI 這次讀到的版本；editableEntries 是目前畫面上的最新版本
+  // （使用者沒動過的欄位維持 AI 原始輸出），confirm 時整批送出這份目前版本，不是原始版本。
+  const editableEntries = entries.map((entry) => ({
+    field: entry.field,
+    value: entry.value,
+    unit: entry.unit || null,
+  }));
   if (entries.length) {
     const list = document.createElement('ul');
-    list.className = 'ew-chat-entries';
-    entries.forEach((entry) => {
+    list.className = 'ew-chat-entries ew-chat-entries-editable';
+    entries.forEach((entry, index) => {
       const li = document.createElement('li');
-      const label = document.createElement('span');
-      label.className = 'k';
-      label.textContent = entry.field;
-      const value = document.createElement('span');
-      value.className = 'v';
-      value.textContent = `${entry.value}${entry.unit ? ' ' + entry.unit : ''}`;
+      const fieldInput = document.createElement('input');
+      fieldInput.type = 'text';
+      fieldInput.className = 'k';
+      fieldInput.value = entry.field;
+      fieldInput.setAttribute('aria-label', '欄位名稱');
+      fieldInput.addEventListener('input', () => {
+        editableEntries[index].field = fieldInput.value.trim();
+      });
+      const valueInput = document.createElement('input');
+      valueInput.type = 'text';
+      valueInput.className = 'v';
+      valueInput.value = String(entry.value);
+      valueInput.setAttribute('aria-label', '數值');
+      valueInput.addEventListener('input', () => {
+        const raw = valueInput.value.trim();
+        editableEntries[index].value = /^-?\d+(\.\d+)?$/.test(raw) ? Number(raw) : raw;
+      });
+      const unitInput = document.createElement('input');
+      unitInput.type = 'text';
+      unitInput.className = 'u';
+      unitInput.value = entry.unit || '';
+      unitInput.placeholder = '單位';
+      unitInput.setAttribute('aria-label', '單位');
+      unitInput.addEventListener('input', () => {
+        editableEntries[index].unit = unitInput.value.trim() || null;
+      });
       const conf = document.createElement('span');
       conf.className = 'c';
-      conf.textContent = `信心度 ${Math.round(entry.confidence * 100)}%`;
-      li.append(label, value, conf);
+      conf.textContent = `AI 信心度 ${Math.round(entry.confidence * 100)}%`;
+      li.append(fieldInput, valueInput, unitInput, conf);
       list.appendChild(li);
     });
     wrap.appendChild(list);
+    const editHint = document.createElement('p');
+    editHint.className = 'ew-chat-edit-hint';
+    editHint.textContent = 'AI 讀錯了嗎？可以直接改上面的欄位名稱／數值／單位，送出的是你確認後的版本。';
+    wrap.appendChild(editHint);
+  }
+
+  /**
+   * 2026-08-29：過去不管 AI 讀到文件本身寫的涵蓋期間是什麼，一律把 coveredFrom/
+   * coveredTo 寫死成 2026 全年——拿「異常缺期版」demo 電費單測過，AI 正確讀出這份文件
+   * 只涵蓋 2026 上半年，但因為寫死年度，該有的缺期警告永遠不會被觸發。現在優先用 AI
+   * 從文件本身判斷出的涵蓋期間（result.coveredFrom/coveredTo，見 llmExtract.js 的
+   * CLASSIFY_SYSTEM_PROMPT），AI 沒判斷出來才 fallback 回 2026 全年預設值；兩種情況
+   * 使用者送出前都可以直接改。
+   */
+  const periodState = {
+    coveredFrom: result.coveredFrom || '2026-01-01',
+    coveredTo: result.coveredTo || '2026-12-31',
+  };
+  if (entries.length) {
+    const periodRow = document.createElement('div');
+    periodRow.className = 'ew-chat-period';
+    const periodLabel = document.createElement('span');
+    periodLabel.className = 'ew-chat-period-label';
+    periodLabel.textContent = result.coveredFrom && result.coveredTo
+      ? 'AI 讀到的涵蓋期間（可修改）：'
+      : '涵蓋期間（AI 沒判斷出來，預設整年，可修改）：';
+    const fromInput = document.createElement('input');
+    fromInput.type = 'date';
+    fromInput.value = periodState.coveredFrom;
+    fromInput.setAttribute('aria-label', '涵蓋起日');
+    fromInput.addEventListener('input', () => {
+      periodState.coveredFrom = fromInput.value;
+    });
+    const toInput = document.createElement('input');
+    toInput.type = 'date';
+    toInput.value = periodState.coveredTo;
+    toInput.setAttribute('aria-label', '涵蓋迄日');
+    toInput.addEventListener('input', () => {
+      periodState.coveredTo = toInput.value;
+    });
+    const sep = document.createElement('span');
+    sep.textContent = '～';
+    periodRow.append(periodLabel, fromInput, sep, toInput);
+    wrap.appendChild(periodRow);
   }
 
   const actions = document.createElement('div');
@@ -1854,9 +1930,10 @@ function buildEntryPreviewNode(result, meta, batch) {
           filename: meta.filename,
           mediaType: meta.mediaType,
           contentBase64: meta.contentBase64,
-          coveredFrom: '2026-01-01',
-          coveredTo: '2026-12-31',
+          coveredFrom: periodState.coveredFrom,
+          coveredTo: periodState.coveredTo,
           source: 'chat-upload',
+          entries: editableEntries.length ? editableEntries : undefined,
         }),
       'Evidence 已安全上傳；原始內容不會出現在 Audit Timeline。',
       (error) => {

@@ -32,6 +32,7 @@ const {
   decodeEvidence,
   containsInjection,
   normalizeEntry,
+  humanReviewedToRawEntries,
   missingEvidenceFindings,
   evaluateHeuristic,
   DEMO_HEURISTICS,
@@ -153,16 +154,24 @@ async function analyzeEvidenceWithLlm(snapshot, options = {}) {
       continue;
     }
 
-    // 每份文件各自獨立呼叫，不共用 context——這是隊長明確裁示的資料最小化設計。
-    const { rawEntries, modelVersion: usedModelVersion } = await extractEntriesWithLlm({
-      documentText: decoded.mode === 'text' ? decoded.text : undefined,
-      imageBase64: decoded.mode === 'image' ? decoded.imageBase64 : undefined,
-      imageMediaType: decoded.mode === 'image' ? decoded.imageMediaType : undefined,
-      filename: safeSourceFile,
-      evidenceType: item.type,
-      persistPromptResponse: options.persistPromptResponse,
-    });
-    modelVersion = usedModelVersion;
+    // 2026-08-29：使用者在聊天預覽卡片裡編輯過的欄位一律優先採用，完全不重新呼叫 LLM
+    // ——不只是省一次呼叫成本，更是讓編輯真的有意義：沒有這一段，下次分析還是會重新讀
+    // 原始檔案再問一次 LLM，使用者剛剛的修正會被直接覆蓋掉，等於編輯白做。
+    const humanReviewed = humanReviewedToRawEntries(item);
+    let rawEntries = humanReviewed;
+    if (!rawEntries) {
+      // 每份文件各自獨立呼叫，不共用 context——這是隊長明確裁示的資料最小化設計。
+      const extracted = await extractEntriesWithLlm({
+        documentText: decoded.mode === 'text' ? decoded.text : undefined,
+        imageBase64: decoded.mode === 'image' ? decoded.imageBase64 : undefined,
+        imageMediaType: decoded.mode === 'image' ? decoded.imageMediaType : undefined,
+        filename: safeSourceFile,
+        evidenceType: item.type,
+        persistPromptResponse: options.persistPromptResponse,
+      });
+      rawEntries = extracted.rawEntries;
+      modelVersion = extracted.modelVersion;
+    }
 
     const parsed = Array.isArray(rawEntries) ? rawEntries : [];
     if (parsed.length > MAX_ENTRIES_PER_EVIDENCE) truncated = true;

@@ -9,6 +9,8 @@ const {
 const trustAdapter = require('./trustAdapter');
 const agentAdapter = require('./agentAdapter');
 const vaultKeys = require('./vaultKeys');
+const googleTokens = require('./googleTokens');
+const googleApi = require('../services/notify/google');
 const { ROLES: DPP_ROLES, buildLayeredDisclosure } = require('../services/dpp');
 
 const MAX_EVIDENCE_BYTES = 512 * 1024;
@@ -614,11 +616,52 @@ function validateVaultEncryptionFields(body) {
   };
 }
 
+// 2026-08-29：聊天預覽卡片讓使用者在確認前編輯 AI 讀出來的欄位（見 services/agent/index.js
+// 的 humanReviewedToRawEntries() 註解——真的拿一張民國 101 年電費單重複上傳，發現 LLM
+// 兩次抽出的欄位名稱不一樣，同一個數字甚至兩次被貼上不同單位）。這裡只做輕量的形狀驗證
+// （陣列、field 非空字串、value 是 string/number/boolean、unit 選填字串），真正的字元/
+// 長度白名單交給分析階段既有的 normalizeEntry() 統一把關——跟其他來源的 raw entries（LLM
+// 抽取／regex 解析）用同一道安全閘門，不因為是人工輸入就少一層檢查。
+const MAX_HUMAN_REVIEWED_ENTRIES = 20;
+
+function validateEvidenceEntries(rawEntries) {
+  if (rawEntries === undefined) return undefined;
+  if (!Array.isArray(rawEntries) || rawEntries.length > MAX_HUMAN_REVIEWED_ENTRIES) {
+    throw new WorkflowAdapterError(
+      'INVALID_EVIDENCE_ENTRIES',
+      `entries 必須是陣列，且最多 ${MAX_HUMAN_REVIEWED_ENTRIES} 筆。`,
+      null
+    );
+  }
+  return rawEntries.map((entry) => {
+    if (
+      !entry ||
+      typeof entry !== 'object' ||
+      typeof entry.field !== 'string' ||
+      !entry.field.trim() ||
+      !['string', 'number', 'boolean'].includes(typeof entry.value) ||
+      (entry.unit !== undefined && entry.unit !== null && typeof entry.unit !== 'string')
+    ) {
+      throw new WorkflowAdapterError(
+        'INVALID_EVIDENCE_ENTRIES',
+        'entries 內每筆都需要非空字串 field 與 string/number/boolean 的 value。',
+        null
+      );
+    }
+    return {
+      field: entry.field.trim(),
+      value: entry.value,
+      unit: typeof entry.unit === 'string' && entry.unit.trim() ? entry.unit.trim() : null,
+    };
+  });
+}
+
 async function createEvidence(actor, body) {
   const scope = requireCase(actor, body.caseId, 'Supplier');
   if (scope.error) return scope.error;
   try {
     const { filename, metadata } = validateEvidenceInput(body);
+    const humanReviewedEntries = validateEvidenceEntries(body.entries);
     if (workflowStore.listEvidence(body.caseId).length >= MAX_EVIDENCE_PER_CASE) {
       return fail(
         409,
@@ -655,6 +698,7 @@ async function createEvidence(actor, body) {
       sizeBytes: bytes.byteLength,
       contentBase64: body.contentBase64,
       ...vaultEncryption,
+      ...(humanReviewedEntries ? { humanReviewedEntries } : {}),
       demoOnly: true,
     });
     audit(actor, 'EVIDENCE_UPLOAD', 'evidence', evidence.evidenceId, 'ALLOW', null, body.caseId);
@@ -719,7 +763,7 @@ async function previewEvidence(actor, body) {
     const isImage = body.mediaType.startsWith('image/');
     const text = isImage ? undefined : new TextDecoder().decode(bytes);
     const caseContext = buildChatCaseContext(body.caseId);
-    const { documentType, documentTypeConfidence, entries, chatReply, modelVersion, unsafeDropped } = await agentAdapter.previewExtraction({
+    const { documentType, documentTypeConfidence, entries, chatReply, modelVersion, unsafeDropped, coveredFrom, coveredTo } = await agentAdapter.previewExtraction({
       filename,
       mediaType: body.mediaType,
       text,
@@ -734,7 +778,7 @@ async function previewEvidence(actor, body) {
       entryCount: entries.length,
       isChatReply: Boolean(chatReply),
     });
-    return ok(200, { documentType, documentTypeConfidence, entries, chatReply, modelVersion, unsafeDropped, demoOnly: true });
+    return ok(200, { documentType, documentTypeConfidence, entries, chatReply, modelVersion, unsafeDropped, coveredFrom, coveredTo, demoOnly: true });
   } catch (error) {
     if (error instanceof agentAdapter.AgentAdapterError) {
       const stable = agentAdapter.stableAgentError(error);
@@ -1138,6 +1182,300 @@ function physicalRealityBoundary() {
   });
 }
 
+/**
+ * Google OAuth 通知串接（Day 5 待辦）——設計原則跟 commit_cbam_draft 的人審精神一致：
+ * AI（下面的 draftCaseNotification）只能「問」跟「草擬」，實際寄信/寫入行事曆
+ * （sendCaseNotificationEmail／createCaseReminderEvent）一定要呼叫端明確帶 confirm:true，
+ * 不是另開一套權限邏輯，是同一個「人審才能真的動作」原則套用在通知這個新工具上。
+ *
+ * token 存放見 server/googleTokens.js；跟 Google 對話的純函式見
+ * services/notify/google.js；這裡只負責 HTTP route 的輸入驗證、案件 scope 檢查、audit。
+ */
+
+function requireGoogleEnv() {
+  const clientId = process.env.GOOGLE_CLIENT_ID;
+  const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+  if (!clientId || !clientSecret) {
+    throw new WorkflowAdapterError(
+      'GOOGLE_OAUTH_NOT_CONFIGURED',
+      '伺服器尚未設定 GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET。',
+      null
+    );
+  }
+  return { clientId, clientSecret };
+}
+
+function googleRedirectUri(origin) {
+  if (!origin) {
+    throw new WorkflowAdapterError(
+      'GOOGLE_ORIGIN_UNKNOWN',
+      '無法判斷目前網址，請重新整理頁面後再試。',
+      null
+    );
+  }
+  return `${origin}/api/oauth/google/callback`;
+}
+
+/** GoogleNotifyError 需要專屬的 stable 映射（見 services/notify/google.js），一般
+ * stableError() 的 fallback 訊息是碳排計算專用文字，套在 Google 錯誤上會誤導。 */
+function stableGoogleOrWorkflowError(error) {
+  if (error instanceof googleApi.GoogleNotifyError) return googleApi.stableGoogleError(error);
+  return stableError(error);
+}
+
+function googleAuthorize(actor, origin) {
+  if (actor.role !== 'Supplier') {
+    return fail(403, 'ROLE_FORBIDDEN', '只有 Supplier 能連接 Google 帳號。');
+  }
+  try {
+    const { clientId } = requireGoogleEnv();
+    const state = randomToken();
+    googleTokens.issuePendingState(state);
+    const authorizeUrl = googleApi.buildAuthorizeUrl({
+      clientId,
+      redirectUri: googleRedirectUri(origin),
+      state,
+    });
+    return ok(200, { authorizeUrl });
+  } catch (error) {
+    return safeAdapterFailure(error);
+  }
+}
+
+function googleStatus() {
+  const tokens = googleTokens.getTokens();
+  if (!tokens) return ok(200, { connected: false });
+  return ok(200, {
+    connected: true,
+    connectedAt: tokens.connectedAt,
+    connectedBy: tokens.connectedBy,
+    scope: tokens.scope,
+    hasRefreshToken: Boolean(tokens.refreshToken),
+  });
+}
+
+async function googleDisconnect(actor) {
+  if (actor.role !== 'Supplier') {
+    return fail(403, 'ROLE_FORBIDDEN', '只有 Supplier 能中斷 Google 連接。');
+  }
+  const tokens = googleTokens.getTokens();
+  if (tokens) {
+    await googleApi.revokeToken(tokens.refreshToken || tokens.accessToken);
+  }
+  googleTokens.clear();
+  audit(actor, 'GOOGLE_OAUTH_DISCONNECT', 'google_connection', null, 'ALLOW', null, null);
+  return ok(200, { connected: false });
+}
+
+/**
+ * 這個路由不是給 Demo 角色呼叫的一般 API——是 Google 自己導回瀏覽器的重新導向端點，
+ * 這次瀏覽器 navigation 不會帶 x-demo-role（見 apiFetch.js 特別處理這條路徑的註解）。
+ * 回傳值是給呼叫端組成 302 redirect 用，不是 JSON body。
+ */
+async function handleGoogleOAuthCallback(url) {
+  const code = url.searchParams.get('code');
+  const state = url.searchParams.get('state');
+  const errorParam = url.searchParams.get('error');
+  const redirectBase = `${url.origin}/`;
+  const fixedActorId = workflowStore.DEMO_ACTORS.Supplier.actorId;
+
+  if (errorParam) {
+    return { redirectTo: `${redirectBase}?googleOauth=error&reason=${encodeURIComponent(errorParam)}` };
+  }
+  if (!code || !state || !googleTokens.consumePendingState(state)) {
+    return { redirectTo: `${redirectBase}?googleOauth=error&reason=invalid_state` };
+  }
+  try {
+    const { clientId, clientSecret } = requireGoogleEnv();
+    const redirectUri = googleRedirectUri(url.origin);
+    const tokenResponse = await googleApi.exchangeCodeForTokens({
+      clientId,
+      clientSecret,
+      redirectUri,
+      code,
+    });
+    googleTokens.setTokens({
+      accessToken: tokenResponse.access_token,
+      refreshToken: tokenResponse.refresh_token || null,
+      expiresAtMs: Date.now() + (tokenResponse.expires_in || 3600) * 1000,
+      scope: tokenResponse.scope || googleApi.SCOPES,
+      connectedBy: fixedActorId,
+    });
+    workflowStore.appendAudit({
+      actorId: fixedActorId,
+      role: 'Supplier',
+      action: 'GOOGLE_OAUTH_CONNECT',
+      targetType: 'google_connection',
+      targetId: null,
+      result: 'ALLOW',
+      reasonCode: null,
+      caseId: null,
+    });
+    return { redirectTo: `${redirectBase}?googleOauth=connected` };
+  } catch (error) {
+    workflowStore.appendAudit({
+      actorId: fixedActorId,
+      role: 'Supplier',
+      action: 'GOOGLE_OAUTH_CONNECT',
+      targetType: 'google_connection',
+      targetId: null,
+      result: 'ERROR',
+      reasonCode: stableGoogleOrWorkflowError(error).code,
+      caseId: null,
+    });
+    return { redirectTo: `${redirectBase}?googleOauth=error&reason=exchange_failed` };
+  }
+}
+
+async function ensureFreshGoogleAccessToken() {
+  const tokens = googleTokens.getTokens();
+  if (!tokens) {
+    throw new WorkflowAdapterError('GOOGLE_NOT_CONNECTED', '尚未連接 Google 帳號，請先完成連接。', null);
+  }
+  if (tokens.expiresAtMs && tokens.expiresAtMs - Date.now() > 60 * 1000) {
+    return tokens.accessToken;
+  }
+  if (!tokens.refreshToken) {
+    throw new WorkflowAdapterError(
+      'GOOGLE_REAUTH_REQUIRED',
+      'Google 授權已過期且沒有可用的 refresh token，請重新連接。',
+      null
+    );
+  }
+  const { clientId, clientSecret } = requireGoogleEnv();
+  const refreshed = await googleApi.refreshAccessToken({
+    clientId,
+    clientSecret,
+    refreshToken: tokens.refreshToken,
+  });
+  googleTokens.updateAccessToken({
+    accessToken: refreshed.access_token,
+    expiresAtMs: Date.now() + (refreshed.expires_in || 3600) * 1000,
+  });
+  return refreshed.access_token;
+}
+
+/** 純文字草稿，不打任何外部 API、不需要 Google 已連接——「AI 只能問跟草擬」這句話字面上
+ * 的意思：草擬這一步完全不需要動用真的寄信/寫入行事曆的權限。 */
+function buildNotificationDraft(caseId) {
+  const readiness = evidenceReadiness(caseId);
+  const missingLabels = readiness.missing.map((type) => REQUIRED_TYPE_LABELS_ZH[type] || type);
+  const caseRecord = workflowStore.getCase(caseId);
+  const reminderAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+  const subject = `【Mandate】${caseId} 尚缺 ${missingLabels.length} 項必要文件`;
+  const bodyLines = [
+    `案件 ${caseId}（${caseRecord ? caseRecord.title : ''}）目前還缺以下必要文件：`,
+    ...missingLabels.map((label) => `・${label}`),
+    '',
+    '請盡快至 Mandate 平台補齊，以利案件進入查驗階段。',
+    '（此信由 AI 草擬，經人工確認後寄出，非系統自動發送。）',
+  ];
+  return {
+    caseId,
+    missingLabels,
+    email: {
+      subject,
+      bodyText: bodyLines.join('\n'),
+    },
+    calendarReminder: {
+      summary: `補件提醒：${caseId} 缺 ${missingLabels.length} 項文件`,
+      description: bodyLines.join('\n'),
+      startIso: reminderAt.toISOString(),
+      endIso: new Date(reminderAt.getTime() + 30 * 60 * 1000).toISOString(),
+    },
+    demoOnly: true,
+  };
+}
+
+function draftCaseNotification(actor, caseId) {
+  const scope = requireCase(actor, caseId, 'Supplier');
+  if (scope.error) return scope.error;
+  const readiness = evidenceReadiness(caseId);
+  if (!readiness.missing.length) {
+    return fail(409, 'NO_MISSING_EVIDENCE', '此案件目前沒有缺件，不需要補件通知。');
+  }
+  const draft = buildNotificationDraft(caseId);
+  audit(actor, 'GOOGLE_NOTIFY_DRAFT', 'case', caseId, 'ALLOW', null, caseId, {
+    counts: { missing: readiness.missing.length },
+  });
+  return ok(200, draft);
+}
+
+async function sendCaseNotificationEmail(actor, caseId, body) {
+  const scope = requireCase(actor, caseId, 'Supplier');
+  if (scope.error) return scope.error;
+  if (body.confirm !== true) {
+    return fail(400, 'HUMAN_CONFIRMATION_REQUIRED', '寄送 Email 前必須明確確認（confirm 必須為 true）。');
+  }
+  const to = typeof body.to === 'string' ? body.to.trim() : '';
+  const subject = typeof body.subject === 'string' ? body.subject.trim() : '';
+  const bodyText = typeof body.bodyText === 'string' ? body.bodyText : '';
+  if (!to || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to) || !subject || !bodyText) {
+    return fail(
+      400,
+      'INVALID_NOTIFICATION_PAYLOAD',
+      'to／subject／bodyText 皆為必填，且 to 必須是有效 email。'
+    );
+  }
+  try {
+    const accessToken = await ensureFreshGoogleAccessToken();
+    const result = await googleApi.sendGmail({ accessToken, to, subject, bodyText });
+    audit(actor, 'GOOGLE_EMAIL_SEND', 'case', caseId, 'ALLOW', null, caseId, {
+      to,
+      messageId: result.id,
+    });
+    return ok(200, { sent: true, messageId: result.id, demoOnly: true });
+  } catch (error) {
+    const stable = stableGoogleOrWorkflowError(error);
+    audit(actor, 'GOOGLE_EMAIL_SEND', 'case', caseId, 'ERROR', stable.code, caseId, { to });
+    const status =
+      stable.code === 'GOOGLE_NOT_CONNECTED' || stable.code === 'GOOGLE_REAUTH_REQUIRED' ? 409 : 502;
+    return fail(status, stable.code, stable.message, stable.details, stable.retryable);
+  }
+}
+
+async function createCaseReminderEvent(actor, caseId, body) {
+  const scope = requireCase(actor, caseId, 'Supplier');
+  if (scope.error) return scope.error;
+  if (body.confirm !== true) {
+    return fail(
+      400,
+      'HUMAN_CONFIRMATION_REQUIRED',
+      '建立行事曆提醒前必須明確確認（confirm 必須為 true）。'
+    );
+  }
+  const summary = typeof body.summary === 'string' ? body.summary.trim() : '';
+  const startIso = typeof body.startIso === 'string' ? body.startIso : '';
+  const endIso = typeof body.endIso === 'string' ? body.endIso : '';
+  if (!summary || Number.isNaN(Date.parse(startIso)) || Number.isNaN(Date.parse(endIso))) {
+    return fail(
+      400,
+      'INVALID_NOTIFICATION_PAYLOAD',
+      'summary／startIso／endIso 皆為必填且必須是有效時間。'
+    );
+  }
+  try {
+    const accessToken = await ensureFreshGoogleAccessToken();
+    const result = await googleApi.createCalendarEvent({
+      accessToken,
+      summary,
+      description: typeof body.description === 'string' ? body.description : '',
+      startIso,
+      endIso,
+    });
+    audit(actor, 'GOOGLE_CALENDAR_CREATE', 'case', caseId, 'ALLOW', null, caseId, {
+      eventId: result.id,
+    });
+    return ok(200, { created: true, eventId: result.id, htmlLink: result.htmlLink || null, demoOnly: true });
+  } catch (error) {
+    const stable = stableGoogleOrWorkflowError(error);
+    audit(actor, 'GOOGLE_CALENDAR_CREATE', 'case', caseId, 'ERROR', stable.code, caseId);
+    const status =
+      stable.code === 'GOOGLE_NOT_CONNECTED' || stable.code === 'GOOGLE_REAUTH_REQUIRED' ? 409 : 502;
+    return fail(status, stable.code, stable.message, stable.details, stable.retryable);
+  }
+}
+
 async function handleWorkflowApi(method, pathname, body = {}, context = {}) {
   const isWorkflowRoute =
     pathname === '/api/cases' ||
@@ -1149,6 +1487,8 @@ async function handleWorkflowApi(method, pathname, body = {}, context = {}) {
     pathname.startsWith('/api/vault/') ||
     pathname.startsWith('/api/workflow/') ||
     pathname.startsWith('/api/demo/') ||
+    pathname.startsWith('/api/notify/') ||
+    pathname === '/api/oauth/google/authorize' ||
     pathname === '/api/agent/analyze';
   if (!isWorkflowRoute) return null;
 
@@ -1310,6 +1650,33 @@ async function handleWorkflowApi(method, pathname, body = {}, context = {}) {
     return physicalRealityBoundary();
   }
 
+  if (method === 'GET' && pathname === '/api/oauth/google/authorize') {
+    return googleAuthorize(actor, context.origin);
+  }
+
+  if (method === 'GET' && pathname === '/api/notify/google/status') {
+    return googleStatus();
+  }
+
+  if (method === 'POST' && pathname === '/api/notify/google/disconnect') {
+    return googleDisconnect(actor);
+  }
+
+  const notifyDraftMatch = pathname.match(/^\/api\/cases\/([^/]+)\/notify\/draft$/);
+  if (method === 'POST' && notifyDraftMatch) {
+    return draftCaseNotification(actor, decodeURIComponent(notifyDraftMatch[1]));
+  }
+
+  const notifyEmailMatch = pathname.match(/^\/api\/cases\/([^/]+)\/notify\/email$/);
+  if (method === 'POST' && notifyEmailMatch) {
+    return sendCaseNotificationEmail(actor, decodeURIComponent(notifyEmailMatch[1]), body);
+  }
+
+  const notifyCalendarMatch = pathname.match(/^\/api\/cases\/([^/]+)\/notify\/calendar$/);
+  if (method === 'POST' && notifyCalendarMatch) {
+    return createCaseReminderEvent(actor, decodeURIComponent(notifyCalendarMatch[1]), body);
+  }
+
   if (method === 'POST' && pathname === '/api/workflow/reset') {
     const scope = requireCase(actor, workflowStore.DEMO_CASE_ID, 'Supplier');
     if (scope.error) return scope.error;
@@ -1355,4 +1722,5 @@ module.exports = {
   MAX_EVIDENCE_BYTES,
   handleWorkflowApi,
   handleDppApi,
+  handleGoogleOAuthCallback,
 };

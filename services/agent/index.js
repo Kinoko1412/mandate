@@ -166,6 +166,32 @@ function parseEvidence(item, text) {
   return parseTextEntries(text);
 }
 
+/**
+ * 2026-08-29：真的拿一張民國 101 年電費單重複上傳測過，發現 LLM 抽取有非決定性
+ * ——同一張圖兩次抽出的欄位名稱不一樣，其中一個數字甚至兩次被貼上不同單位（一次是
+ * 「用電天數」、一次變成「這期用電度數 kWh」），信心度卻兩次都還是 70% 左右，完全沒反映
+ * 出兩次結果互相矛盾。這個工具的賣點之一是幫使用者抓缺件/資料異常，如果 AI 讀錯又沒有
+ * 人工修正的空間，這個賣點就站不住——所以讓使用者在聊天預覽卡片裡確認前，可以直接編輯
+ * AI 讀出來的欄位名稱/數值/單位，取代 AI 這次讀到的版本。
+ *
+ * 這裡把「使用者編輯過的欄位」轉成跟 parseEvidence()／extractEntriesWithLlm() 一樣的
+ * raw entry 形狀，一樣要通過 normalizeEntry() 的安全白名單（欄位名稱格式、單位格式、
+ * injection 關鍵字全部照舊檢查，不因為是人工輸入就跳過）。confidence 給 1、
+ * humanConfirmed 給 true——人已經明確看過並確認這個值，語意上跟系統相信度最高的來源
+ * 一致，讓下面的 eligibleForCalculation 判斷可以正確把人工確認過的高影響欄位視為可信。
+ */
+function humanReviewedToRawEntries(item) {
+  if (!Array.isArray(item.humanReviewedEntries)) return null;
+  return item.humanReviewedEntries.map((entry) => ({
+    field: entry && entry.field,
+    value: entry && entry.value,
+    unit: entry && entry.unit ? entry.unit : null,
+    sourcePage: 1,
+    confidence: 1,
+    humanConfirmed: true,
+  }));
+}
+
 function normalizeEntry(raw, item) {
   if (!raw || typeof raw !== 'object' || typeof raw.field !== 'string') {
     return { entry: null, unsafeText: true, unitAmbiguous: false };
@@ -410,7 +436,8 @@ function analyzeEvidence(snapshot) {
       nextActions.push('請以允許的 ASCII 檔名與受控欄位重新上傳 Demo 證據。');
       continue;
     }
-    const parsed = parseEvidence({ ...item, filename: safeSourceFile }, text);
+    const humanReviewed = humanReviewedToRawEntries(item);
+    const parsed = humanReviewed || parseEvidence({ ...item, filename: safeSourceFile }, text);
     if (parsed.length > MAX_ENTRIES_PER_EVIDENCE) truncated = true;
     for (const raw of parsed.slice(0, MAX_ENTRIES_PER_EVIDENCE)) {
       if (entries.length >= MAX_ENTRIES_PER_CASE) {
@@ -579,6 +606,7 @@ module.exports = {
   decodeEvidence,
   containsInjection,
   normalizeEntry,
+  humanReviewedToRawEntries,
   missingEvidenceFindings,
   evaluateHeuristic,
   DEMO_HEURISTICS,

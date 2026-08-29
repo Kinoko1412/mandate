@@ -141,6 +141,8 @@ async function previewExtraction({ filename, mediaType, text, imageBase64, userN
   let rawEntries;
   let chatReply;
   let modelVersion;
+  let coveredFrom;
+  let coveredTo;
   try {
     const result = await classifyAndExtractWithLlm({
       documentText: text,
@@ -157,6 +159,8 @@ async function previewExtraction({ filename, mediaType, text, imageBase64, userN
     rawEntries = result.rawEntries;
     chatReply = result.chatReply;
     modelVersion = result.modelVersion;
+    coveredFrom = result.coveredFrom;
+    coveredTo = result.coveredTo;
   } catch (err) {
     throw new AgentAdapterError(
       'AGENT_ANALYSIS_FAILED',
@@ -174,7 +178,19 @@ async function previewExtraction({ filename, mediaType, text, imageBase64, userN
       else unsafeDropped += 1;
     }
   }
-  return { documentType, documentTypeConfidence, entries, chatReply, modelVersion, unsafeDropped };
+  // coveredFrom/coveredTo 只有兩個都存在且起日不晚於迄日才算數，不然半套的日期範圍
+  // 比什麼都不填更誤導人——前端會照舊 fallback 回 2026 全年。
+  const validPeriod = coveredFrom && coveredTo && coveredFrom <= coveredTo;
+  return {
+    documentType,
+    documentTypeConfidence,
+    entries,
+    chatReply,
+    modelVersion,
+    unsafeDropped,
+    coveredFrom: validPeriod ? coveredFrom : null,
+    coveredTo: validPeriod ? coveredTo : null,
+  };
 }
 
 function stableAgentError(error) {
