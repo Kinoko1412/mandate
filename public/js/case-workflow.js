@@ -2612,7 +2612,21 @@ async function accessEvidence(mode) {
     downloadBytesEvidence(result.evidence, plaintextBytes);
     showNotice('指定底稿已下載一次；Grant 與 session token 已清除。');
   } else {
-    $('opened-content').textContent = VaultCryptoCore.bytesToUtf8(plaintextBytes);
+    // 2026-08-29：底稿內容原本一律當文字硬轉，圖片證據（聊天上傳現在幾乎都是照片）解密後
+    // 會被 bytesToUtf8() 轉成一堆亂碼字元（IHDR/IDATx 這類 PNG binary marker），查驗員
+    // 根本看不到真正的文件長怎樣——「開啟底稿核對」這個功能對圖片證據等於是壞的。
+    // mediaType 是 image/* 時改成渲染成 <img>，其餘（文字/JSON）維持原本的文字顯示。
+    const opened = $('opened-content');
+    opened.replaceChildren();
+    if (result.evidence.mediaType && result.evidence.mediaType.startsWith('image/')) {
+      const img = document.createElement('img');
+      img.className = 'opened-content-img';
+      img.alt = result.evidence.filename || '底稿預覽';
+      img.src = `data:${result.evidence.mediaType};base64,${VaultCryptoCore.bytesToBase64(plaintextBytes)}`;
+      opened.appendChild(img);
+    } else {
+      opened.textContent = VaultCryptoCore.bytesToUtf8(plaintextBytes);
+    }
     $('opened-evidence-vault-status').textContent = result.evidence.vaultEncrypted
       ? '🔒 已加密（Vault PRF）'
       : '⚠ 未加密（Verifier 當時尚未註冊裝置）';

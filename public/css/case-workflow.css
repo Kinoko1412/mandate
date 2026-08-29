@@ -627,6 +627,14 @@ td code {
   background: white;
 }
 
+.opened-content-img {
+  display: block;
+  max-width: 100%;
+  max-height: 420px;
+  margin: 0 auto;
+  border-radius: var(--radius);
+}
+
 .finding {
   margin-top: 10px;
   padding: 10px 12px;
