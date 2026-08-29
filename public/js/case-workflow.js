@@ -380,9 +380,9 @@ function textList(items, emptyText) {
   return list;
 }
 
-function reportSection(title, child) {
+function reportSection(title, child, variant) {
   const section = document.createElement('section');
-  section.className = 'report-section';
+  section.className = variant ? `report-section report-section-${variant}` : 'report-section';
   const heading = document.createElement('h4');
   heading.textContent = title;
   section.append(heading, child);
@@ -454,7 +454,11 @@ function renderRiskReport(target, report) {
     ),
     reportSection(
       'Missing evidence',
-      createTable(['Required', 'Covered', 'Missing', 'Requested action'], missingRows)
+      createTable(['Required', 'Covered', 'Missing', 'Requested action'], missingRows),
+      // 2026-08-29：使用者實測 Beat 3 缺期偵測後反映，這一區跟其他純資訊表格長得一樣，
+      // 不夠顯眼——跟右下角紅色 toast（見 analyzeCase() 的 buildAnalysisAlertLines）呼應，
+      // 這裡只在真的有缺件/缺期時才標紅色，沒有缺件時維持原本樣式，不要一直紅著。
+      missingRows.length ? 'alert' : undefined
     ),
     reportSection(
       'Discrepancies',
@@ -1748,6 +1752,25 @@ function closeLightbox() {
 }
 
 /**
+ * 2026-08-29：「提交年度資料」原本成功/失敗都只在頁面最上方留一行文字，錄影時鏡頭前
+ * 不夠明確。改成置中彈出視窗：成功一個綠色勾勾＋「已成功提交」；失敗一個紅色叉叉＋
+ * 「未成功提交」＋下面一行簡短原因（沿用既有 errorPresentation() 算出來的 reason，
+ * 跟頁面上其他錯誤訊息用同一套映射，不是另外編一份文字）。
+ */
+function showSubmitResultModal({ success, message }) {
+  const icon = $('submit-result-icon');
+  icon.className = 'ew-modal-icon ' + (success ? 'ok' : 'fail');
+  icon.textContent = success ? '✓' : '✕';
+  $('submit-result-title').textContent = success ? '已成功提交' : '未成功提交';
+  $('submit-result-message').textContent = message || '';
+  $('submit-result-modal').hidden = false;
+  $('submit-result-close').focus({ preventScroll: true });
+}
+function closeSubmitResultModal() {
+  $('submit-result-modal').hidden = true;
+}
+
+/**
  * 上傳文件的縮圖，插在「看起來是XX，已擷取N筆欄位」那句話跟欄位清單之間——使用者
  * 才能對照「AI 讀出來的內容」跟「原始文件長怎樣」，肉眼判斷 AI 有沒有看錯，不用
  * 只憑信心度數字盲目相信。純文字貼上的內容沒有圖可看，跳過不顯示縮圖。
@@ -2126,22 +2149,33 @@ async function confirmEvidence(evidenceId) {
 }
 
 async function submitCase() {
-  const result = await runAction(async () => {
-    try {
-      return await api(`/api/cases/${CASE_ID}/submit`, {
-        method: 'POST',
-        role: 'Supplier',
-        body: {},
-      });
-    } finally {
-      await loadRole();
+  let failureReason = null;
+  const result = await runAction(
+    async () => {
+      try {
+        return await api(`/api/cases/${CASE_ID}/submit`, {
+          method: 'POST',
+          role: 'Supplier',
+          body: {},
+        });
+      } finally {
+        await loadRole();
+      }
+    },
+    null,
+    (error) => {
+      failureReason = errorPresentation(error).reason;
     }
-  });
-  if (!result) return;
+  );
+  if (!result) {
+    showSubmitResultModal({ success: false, message: failureReason || '操作未完成。' });
+    return;
+  }
   const message = result.readiness && result.readiness.message
     ? result.readiness.message
     : '案件已提交。';
   showNotice(message);
+  showSubmitResultModal({ success: true, message });
 }
 
 const DISCREPANCY_LABELS = {
@@ -2677,6 +2711,11 @@ function bindEvents() {
   });
   document.addEventListener('keydown', (event) => {
     if (event.key === 'Escape' && !$('chat-lightbox').hidden) closeLightbox();
+    if (event.key === 'Escape' && !$('submit-result-modal').hidden) closeSubmitResultModal();
+  });
+  $('submit-result-close').addEventListener('click', closeSubmitResultModal);
+  $('submit-result-modal').addEventListener('click', (event) => {
+    if (event.target.id === 'submit-result-modal') closeSubmitResultModal();
   });
   $('chat-file-clear').addEventListener('click', () => {
     chatAttachedFile = null;

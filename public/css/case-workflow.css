@@ -547,6 +547,16 @@ td code {
   padding-left: 22px;
 }
 
+.report-section-alert {
+  padding: 10px 10px 14px;
+  border-left: 4px solid var(--alert);
+  background: var(--alert-wash);
+  border-radius: var(--radius);
+}
+.report-section-alert h4 {
+  color: var(--alert-deep);
+}
+
 .token-once {
   grid-column: 1 / -1;
   padding: 14px;

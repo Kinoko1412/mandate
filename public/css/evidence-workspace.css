@@ -246,6 +246,58 @@
 }
 .ew-lightbox-close:hover { background: rgba(255, 255, 255, 0.3); }
 
+/*
+ * 2026-08-29：「提交年度資料」原本只有頁面最上方的一行文字通知，成功/失敗長得幾乎一樣，
+ * 錄影時鏡頭前不夠明確。改成跟 chat-lightbox 同一種全螢幕深色遮罩＋置中卡片，中間放一個
+ * 大圖示（成功綠色勾勾／失敗紅色叉叉）+ 標題 +（失敗時）簡短原因，一眼就看得出結果。
+ */
+.ew-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 5vh 5vw;
+  z-index: 1000;
+}
+.ew-modal-overlay[hidden] { display: none; }
+.ew-modal-card {
+  background: var(--bg-elevated);
+  border-radius: var(--radius-max);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+  padding: var(--space-6) var(--space-5);
+  max-width: 360px;
+  width: 100%;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+}
+.ew-modal-icon {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 30px;
+  line-height: 1;
+  color: #fff;
+  margin-bottom: var(--space-2);
+}
+.ew-modal-icon.ok { background: var(--ok); }
+.ew-modal-icon.fail { background: var(--deny); }
+.ew-modal-title { margin: 0; font-family: var(--font-display); font-size: 20px; }
+.ew-modal-message {
+  margin: 0 0 var(--space-3);
+  font-size: 13.5px;
+  color: var(--ink-muted);
+  line-height: 1.5;
+}
+.ew-modal-card .button { min-width: 120px; }
+
 .trust-check-list {
   list-style: none;
   margin: 8px 0 0;
