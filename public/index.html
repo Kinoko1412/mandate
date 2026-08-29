@@ -138,6 +138,13 @@
     </div>
   </div>
 
+  <!-- 2026-08-29：toast-stack 原本包在 #supplier-view 裡面——position:fixed 讓它視覺上
+       看起來像全域浮層，但父層 #supplier-view 切到 Importer/Verifier 角色時會被加上
+       hidden，導致 toast 完全不會顯示（不是變不明顯，是根本沒渲染）。GRANT_REVOKED 這類
+       錯誤發生在 Verifier 的「開啟底稿」流程，剛好就是踩到這個洞。搬到角色切換的容器外面，
+       任何角色都看得到。 -->
+  <div class="ew-toast-stack" id="toast-stack" aria-live="polite"></div>
+
   <main id="workspace" class="workspace">
     <section id="supplier-view" class="role-view" data-view="Supplier" aria-labelledby="supplier-title">
       <button type="button" class="ew-drawer-toggle" id="evidence-drawer-toggle" aria-label="展開已上傳文件" aria-expanded="false">
@@ -149,7 +156,6 @@
         <div class="ew-drawer-head">已上傳文件</div>
         <div class="ew-file-list" id="evidence-drawer-list"></div>
       </aside>
-      <div class="ew-toast-stack" id="toast-stack" aria-live="polite"></div>
 
       <div class="ew-op-wrap">
       <div class="ew-view-toggle-row">
