@@ -34,14 +34,34 @@ fallthrough = true
 #   OPENAI_API_KEY            required for AI Agent
 #   OPENAI_MODEL, OPENAI_BASE_URL   optional (defaults: gpt-4o-mini / api.openai.com)
 #   SUPABASE_URL, SUPABASE_SERVICE_KEY   optional, enables cloud audit persistence
+#   GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET   optional, enables Google OAuth
+#     notification (缺件補件 Email + Calendar 提醒，見 server/workflowApi.js 的
+#     googleAuthorize/handleGoogleOAuthCallback)。OAuth redirect URI 註冊在 Google
+#     Cloud Console 要跟部署網域完全一致：https://<subdomain>.workers.dev/api/oauth/google/callback
 
 [observability]
 enabled = true
 
+# 2026-08-29：所有 /api/* 請求改走這個 Durable Object（見 worker/index.js 開頭大段註解），
+# 修正 workflowStore.js／vaultKeys.js／googleTokens.js 等模組層級記憶體狀態在一般 Worker
+# 底下跨 isolate 不同步的問題（evidence 上傳 ID 撞號、案件狀態互相看不到彼此寫入）。
+[[durable_objects.bindings]]
+name = "WORKFLOW_DO"
+class_name = "WorkflowDurableObject"
+
 # 這個帳號底下的 `mandate` worker 之前某次部署留下一個叫 MandateState 的 Durable Object
-# class（跟現在這份程式碼完全無關，現在的架構沒有用到任何 Durable Object），Cloudflare
+# class（跟現在這份程式碼完全無關，當時的架構沒有用到任何 Durable Object），Cloudflare
 # 不會讓「原本宣告過的 class 消失」的部署直接通過（怕誤刪還在用的 stateful 資料），
 # 要明確用 migration 宣告「這個 class 真的要刪掉」才放行。這裡就是那個宣告。
 [[migrations]]
 tag = "cleanup-mandate-state-2026-08-26"
 deleted_classes = ["MandateState"]
+
+# 新增本次要用的 WorkflowDurableObject class，跟上面刪除舊 class 是各自獨立的 migration
+# 步驟（tag 不同、依序套用），不能合併成同一筆。免費方案的 Durable Object 一定要用
+# SQLite-backed storage（new_sqlite_classes），不能用舊版 new_classes——這個 DO 完全沒
+# 呼叫 ctx.storage，純粹活在記憶體裡，SQLite backend 只是必要的 provisioning 類型，
+# 不影響任何邏輯。
+[[migrations]]
+tag = "add-workflow-do-2026-08-29"
+new_sqlite_classes = ["WorkflowDurableObject"]
