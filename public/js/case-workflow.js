@@ -1640,7 +1640,27 @@ async function handleChatFilesSelect(fileList) {
     return;
   }
   $('chat-file-input').value = '';
-  await Promise.allSettled(files.map((file) => previewOneFile(file)));
+  const batch = { remaining: files.length, anyConfirmed: false };
+  await Promise.allSettled(files.map((file) => previewOneFile(file, batch)));
+}
+
+/**
+ * 多檔批次上傳時，每份文件各自獨立確認/捨棄，但案件級分析只在整批都處理完後跑一次，
+ * 而不是每份確認完就各自觸發一次——2026-08-29 在正式站上重現過：多個並行的分析請求
+ * 彼此讀到不同時間點的案件快照，讓「還缺幾種文件」的訊息以不合邏輯的順序出現（已確認
+ * 的文件又被列進「還缺」清單）。單一檔案流程沒有 batch 參數，維持原本「確認完立刻
+ * 分析」的行為不變。
+ */
+async function settleBatchItem(batch, confirmed) {
+  if (!batch) {
+    if (confirmed) await runAutoAnalysisInChat();
+    return;
+  }
+  if (confirmed) batch.anyConfirmed = true;
+  batch.remaining -= 1;
+  if (batch.remaining <= 0 && batch.anyConfirmed) {
+    await runAutoAnalysisInChat();
+  }
 }
 
 /**
@@ -1660,11 +1680,14 @@ async function handleChatFilesSelect(fileList) {
  * 供應商端偶發的短暫延遲/限流，不是平行處理邏輯本身的問題——加一次重試换取
  * 這種瞬斷不會直接讓錄影卡住，不做第二次重試是避免真正故障時使用者等太久。
  */
-async function previewOneFile(file) {
+async function previewOneFile(file, batch) {
   const queued = appendChatMessage({ role: 'ai', text: `📎 ${file.name}：排隊中…` });
   const prepared = await prepareChatFile(file);
   if (queued) queued.remove();
-  if (!prepared) return;
+  if (!prepared) {
+    await settleBatchItem(batch, false);
+    return;
+  }
   const meta = {
     filename: prepared.safeName,
     displayName: prepared.name,
@@ -1705,11 +1728,12 @@ async function previewOneFile(file) {
 
   if (processing) processing.remove();
   if (result) {
-    appendChatMessage({ role: 'ai', node: buildEntryPreviewNode(result, meta) });
+    appendChatMessage({ role: 'ai', node: buildEntryPreviewNode(result, meta, batch) });
     pushChatHistory('assistant', summarizeResultForHistory(result));
   } else {
     const presentation = errorPresentation(lastError);
     appendChatMessage({ role: 'ai', text: `${meta.displayName}：上傳失敗——${presentation.reason || '暫時無法讀取這份文件。'}` });
+    await settleBatchItem(batch, false);
   }
 }
 
@@ -1742,7 +1766,7 @@ function buildImageThumb(meta) {
   return btn;
 }
 
-function buildEntryPreviewNode(result, meta) {
+function buildEntryPreviewNode(result, meta, batch) {
   const wrap = document.createElement('div');
   const entries = result.entries || [];
 
@@ -1767,7 +1791,7 @@ function buildEntryPreviewNode(result, meta) {
       chip.textContent = REQUIRED_TYPE_LABELS[type] || type;
       chip.addEventListener('click', async () => {
         chips.remove();
-        await runPreviewAndRespond(meta, `這是${REQUIRED_TYPE_LABELS[type] || type}`);
+        await runPreviewAndRespond(meta, `這是${REQUIRED_TYPE_LABELS[type] || type}`, batch);
       });
       chips.appendChild(chip);
     });
@@ -1850,19 +1874,20 @@ function buildEntryPreviewNode(result, meta) {
       done.textContent = `${meta.displayName || meta.filename} 已送出並確認完成。`;
       wrap.appendChild(done);
       pushChatHistory('assistant', done.textContent);
-      await runAutoAnalysisInChat();
+      await settleBatchItem(batch, true);
     } else {
       confirmBtn.disabled = false;
       discardBtn.disabled = false;
     }
   });
 
-  discardBtn.addEventListener('click', () => {
+  discardBtn.addEventListener('click', async () => {
     wrap.replaceChildren();
     const note = document.createElement('p');
     note.className = 'ew-chat-ai-head';
     note.textContent = '已捨棄，未送出。';
     wrap.appendChild(note);
+    await settleBatchItem(batch, false);
   });
 
   return wrap;
@@ -1877,7 +1902,7 @@ function summarizeResultForHistory(result) {
   return '看不出來這份輸入是哪一種必要文件，已請使用者澄清。';
 }
 
-async function runPreviewAndRespond(meta, userNote) {
+async function runPreviewAndRespond(meta, userNote, batch) {
   if (userNote) {
     appendChatMessage({ role: 'user', text: userNote });
     pushChatHistory('user', userNote);
@@ -1896,7 +1921,7 @@ async function runPreviewAndRespond(meta, userNote) {
     }
   );
   if (result) {
-    appendChatMessage({ role: 'ai', node: buildEntryPreviewNode(result, meta) });
+    appendChatMessage({ role: 'ai', node: buildEntryPreviewNode(result, meta, batch) });
     pushChatHistory('assistant', summarizeResultForHistory(result));
     if (result.documentType && chatAttachedFile && chatAttachedFile.base64 === meta.contentBase64) {
       // 這次點分類按鈕重試用的內容就是目前composer裡附加的檔案，分類成功了就清掉，
@@ -1905,6 +1930,8 @@ async function runPreviewAndRespond(meta, userNote) {
       renderChatFileChip();
       $('chat-file-input').value = '';
     }
+  } else {
+    await settleBatchItem(batch, false);
   }
 }
 
