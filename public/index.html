@@ -98,12 +98,6 @@
             </div>
             <div id="attack-result" class="demo-result" role="status" aria-live="polite">尚未執行攻擊情境。</div>
           </article>
-          <article class="act-card">
-            <h3>幕 4｜誠實邊界</h3>
-            <p>文件數字一致不代表現場儀表正常或已校正。Commitment / Gate 只驗資料一致性，不證明物理真實。</p>
-            <button id="run-act-4" class="button secondary" type="button">展示物理真實邊界</button>
-            <div id="physical-result" class="demo-result" role="status" aria-live="polite">尚未執行物理邊界情境。</div>
-          </article>
         </div>
       </section>
 
@@ -302,6 +296,16 @@
               <button id="clear-token" class="button danger" type="button">清除 token</button>
             </div>
           </div>
+        </section>
+
+        <!-- 2026-08-29：從「顯示測試/開發工具」底下的四幕控制台搬過來——
+             原本要另外展開一個不同的收合面板才找得到，錄 Demo 時多一次不必要的
+             捲動/展開，這裡跟其他錄影步驟共用同一個面板。 -->
+        <section class="panel risk-panel" aria-labelledby="physical-boundary-title">
+          <h3 id="physical-boundary-title">誠實邊界：物理真實</h3>
+          <p class="privacy-note">文件數字一致不代表現場儀表正常或已校正。Commitment / Gate 只驗資料一致性，不證明物理真實。</p>
+          <button id="run-act-4" class="button secondary" type="button">展示物理真實邊界</button>
+          <div id="physical-result" class="demo-result" role="status" aria-live="polite">尚未執行物理邊界情境。</div>
         </section>
       </div>
       </div>

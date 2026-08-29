@@ -397,11 +397,16 @@ function verifyProofEnvelope(envelope, expected, options = {}) {
     )
   );
 
+  // 2026-08-29：這句話是 2026-07 寫的，那時候真的還沒接 zk-SNARK 電路。2026-08-25 之後
+  // trustAdapter.js 已經疊加了 real_zk_proof 這一層真的電路驗證（見 verifyRealZkForShipment
+  // 開頭註解），但這句話忘了跟著改，讀起來變成「這個環境完全沒做過真的驗證」，跟事實不符
+  // ——使用者實際測試時就被這句話搞混過。這裡只是這一步（commitment 重算）本身不是密碼學
+  // 證明，不代表整個系統沒有真的電路驗證，改成把範圍講清楚、並指出真正驗證在哪裡執行。
   checks.push(
     makeCheck(
       'cryptographic_proof',
       'skipped',
-      'demoOnly：本環境未執行 zk-SNARK 電路驗證，只做 commitment 重算與公開輸入綁定；正式版本待接 snarkjs groth16.verify()'
+      'demoOnly：這一步只做 commitment 重算與公開輸入綁定，本身不是密碼學證明；若此政策版本有設定合規門檻，真正的 zk-SNARK 電路驗證會在下方以 real_zk_proof 另外執行'
     )
   );
 

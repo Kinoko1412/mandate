@@ -90,7 +90,10 @@ const ERROR_GUIDANCE = {
   CLIPBOARD_UNAVAILABLE: ['瀏覽器未允許剪貼簿操作。', '可直接切換 Verifier，token 已保存在本次 session。'],
   INVALID_JSON: ['送出的資料格式無效。', '重新載入頁面後再試。'],
   INTERNAL_ERROR: ['伺服器暫時無法完成操作。', '稍後重試；若持續發生，檢查 server 狀態。'],
-  NETWORK_UNAVAILABLE: ['無法連上本機 API。', '確認 npm start 正在執行，然後重新整理。'],
+  // 2026-08-29：原文字寫死「確認 npm start 正在執行」，在正式站(Workers 部署)遇到網路
+  // 問題時顯示這句話文不對題——使用者沒有跑 npm start，這句指示對他毫無意義。改成不假設
+  // 執行環境的通用措辭，本機/正式站都適用。
+  NETWORK_UNAVAILABLE: ['無法連上伺服器 API。', '檢查網路連線後重新整理再試一次。'],
   GOOGLE_OAUTH_NOT_CONFIGURED: ['伺服器尚未設定 Google OAuth 憑證。', '請聯絡負責部署的人設定 GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET。'],
   GOOGLE_ORIGIN_UNKNOWN: ['無法判斷目前網址。', '重新整理頁面後再試一次。'],
   GOOGLE_TOKEN_EXCHANGE_FAILED: ['Google 授權交換失敗。', '請重新點擊「連接 Google 帳號」再試一次。'],
@@ -275,6 +278,16 @@ function showError(error) {
   $('error-next').textContent = `下一步：${presentation.next}`;
   $('error-panel').hidden = false;
   $('error-panel').focus({ preventScroll: true });
+  // 2026-08-29：#error-panel 在頁面最上方，操作卡在頁面下半部（例如撤銷 Grant）時使用者
+  // 看不到，還要自己往上滑才知道發生什麼事。跟分析結果的紅色 toast 用同一套機制，讓錯誤
+  // 也直接跳在右下角，不用先往上找。
+  showToast({
+    title: '操作未完成',
+    message: `${presentation.reason} ${presentation.next}`,
+    // 「查看詳情」對這則通知來說，就是跳去看上面那個完整的 #error-panel(含 reason code)，
+    // 不是預設的檔案抽屜。
+    onAction: () => $('error-panel').scrollIntoView({ behavior: 'auto', block: 'start' }),
+  });
 }
 
 function metric(label, value, note = '') {
