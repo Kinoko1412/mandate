@@ -380,9 +380,10 @@ function textList(items, emptyText) {
   return list;
 }
 
-function reportSection(title, child, variant) {
+function reportSection(title, child, variant, id) {
   const section = document.createElement('section');
   section.className = variant ? `report-section report-section-${variant}` : 'report-section';
+  if (id) section.id = id;
   const heading = document.createElement('h4');
   heading.textContent = title;
   section.append(heading, child);
@@ -458,11 +459,16 @@ function renderRiskReport(target, report) {
       // 2026-08-29：使用者實測 Beat 3 缺期偵測後反映，這一區跟其他純資訊表格長得一樣，
       // 不夠顯眼——跟右下角紅色 toast（見 analyzeCase() 的 buildAnalysisAlertLines）呼應，
       // 這裡只在真的有缺件/缺期時才標紅色，沒有缺件時維持原本樣式，不要一直紅著。
-      missingRows.length ? 'alert' : undefined
+      missingRows.length ? 'alert' : undefined,
+      // id 給紅色 toast 的「查看詳情」用，點下去直接跳到這裡，不用先跳到面板最上面
+      // 再自己往下找（見下面 analyzeCase() 的 onAction）。
+      'report-section-missing-evidence'
     ),
     reportSection(
       'Discrepancies',
-      createTable(['Rule', 'Left', 'Right', 'Difference', 'Severity', 'Possible explanations'], discrepancyRows)
+      createTable(['Rule', 'Left', 'Right', 'Difference', 'Severity', 'Possible explanations'], discrepancyRows),
+      discrepancyRows.length ? 'alert' : undefined,
+      'report-section-discrepancies'
     ),
     reportSection('Open issues', textList(summary.openIssues, '尚無 open issue。')),
     reportSection('Next actions', textList(summary.nextActions, '交由查驗員進行後續專業檢視。')),
@@ -2271,12 +2277,23 @@ async function analyzeCase() {
         showToast({
           title: `Evidence Agent 發現 ${alertLines.length} 項異常`,
           message: alertLines.slice(0, 3).join('；') + (alertLines.length > 3 ? `；等 ${alertLines.length} 項` : ''),
-          // 「查看詳情」預設是開檔案抽屜，這裡改成直接展開案件資訊與進階工具面板並捲過去
-          // ——那裡才是 RiskReport 完整內容（findings/missingEvidence/discrepancies）
-          // 真正所在的地方，開檔案抽屜對這則通知來說文不對題。
+          // 「查看詳情」預設是開檔案抽屜，這裡改成展開案件資訊與進階工具面板、直接捲到
+          // RiskReport 裡真正相關的那個子區塊（Missing evidence 或 Discrepancies，看是
+          // 哪一種異常），不是只捲到面板最上面——2026-08-29 使用者反映只捲到最上面還要
+          // 自己往下滑過 Evidence Index、Proof/Gate 檢查明細才看得到重點，不夠直接。
+          // 兩種都有的話優先跳 Missing evidence；都沒有（理論上不會發生，因為沒異常
+          // 就不會跳這則 toast）就退回捲到面板最上面。
           onAction: () => {
             setSupplierTools(true);
-            $('supplier-tools-panel').scrollIntoView({ behavior: 'smooth', block: 'start' });
+            const target =
+              (result.report.missingEvidence || []).length
+                ? $('report-section-missing-evidence')
+                : (result.report.discrepancies || []).length
+                  ? $('report-section-discrepancies')
+                  : $('supplier-tools-panel');
+            // behavior:'auto'（瞬間跳轉）不是 'smooth'——實測過面板內容長、平滑捲動要跑
+            // 好幾秒才捲到定位，錄 Demo 每一秒都珍貴，不該讓觀眾等一段捲動動畫。
+            target.scrollIntoView({ behavior: 'auto', block: 'start' });
           },
         });
       }
