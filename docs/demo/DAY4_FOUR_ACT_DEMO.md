@@ -40,7 +40,7 @@
 
 **Fallback**
 
-- 若一鍵失敗：手動「載入四份 synthetic Demo evidence」→「**人工確認全部**」→「**提交年度資料**」→「執行 Evidence Agent 預審」→「**重驗 Proof / Gate**」。
+- 若一鍵失敗：手動「載入四份 synthetic Demo evidence」→在 Evidence Index 表格逐筆點「**人工確認**」（共 4 筆）→「**提交年度資料**」→「執行 Evidence Agent 預審」→「**重驗 Proof / Gate**」。（2026-08-29 拿掉「人工確認全部」按鈕：它只服務這條假資料 fallback 路徑、卻跟核心信任機制同名，容易誤導；聊天上傳的真實流程本來就不會用到它，每份文件在聊天卡片裡就已經逐一確認過。）
 - 部署冷啟動後 state 清空：先 **重置 Demo** 再跑幕 1。
 
 ---

@@ -63,7 +63,6 @@ check('root: 三角色與固定案件 hooks 存在', () => {
     'id="verifier-view"',
     'id="audit-timeline"',
     'id="seed-evidence"',
-    'id="confirm-all"',
     'id="submit-case"',
     'id="create-grant"',
     'id="open-evidence"',

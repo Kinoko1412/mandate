@@ -2048,28 +2048,6 @@ async function confirmEvidence(evidenceId) {
   if (result) await runAction(loadRole);
 }
 
-async function confirmAll() {
-  const pending = state.evidence.filter((item) => !item.humanConfirmed);
-  if (!pending.length) {
-    showNotice('所有 evidence 均已人工確認。');
-    return;
-  }
-  const result = await runAction(async () => {
-    for (const item of pending) {
-      await api(`/api/evidence/${encodeURIComponent(item.evidenceId)}/confirm`, {
-        method: 'POST',
-        role: 'Supplier',
-        body: { confirmed: true },
-      });
-    }
-    return true;
-  });
-  if (result) {
-    showNotice(`已人工確認 ${pending.length} 份 evidence。`);
-    await runAction(loadRole);
-  }
-}
-
 async function submitCase() {
   const result = await runAction(async () => {
     try {
@@ -2602,7 +2580,6 @@ function bindEvents() {
   $('seed-evidence').addEventListener('click', seedEvidence);
   $('run-agent-analysis').addEventListener('click', analyzeCase);
   $('revalidate-trust').addEventListener('click', revalidateTrust);
-  $('confirm-all').addEventListener('click', confirmAll);
   $('submit-case').addEventListener('click', submitCase);
   $('create-grant').addEventListener('click', createGrant);
   $('revoke-grant').addEventListener('click', revokeGrant);
