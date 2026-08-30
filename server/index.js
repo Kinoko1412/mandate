@@ -9,6 +9,7 @@ const { loadEnv } = require('./loadEnv');
 loadEnv();
 
 const { handleApiPath, jsonResponse } = require('./apiFetch');
+const { handleGoogleOAuthCallback } = require('./workflowApi');
 
 const PORT = 3847;
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
@@ -110,6 +111,16 @@ const server = http.createServer(async (req, res) => {
   const pathname = url.pathname;
 
   try {
+    // Google 導回瀏覽器的重新導向端點——不是 x-demo-role 認證的一般 API 呼叫，回應也不是
+    // JSON，而是把瀏覽器導回首頁。跟 apiFetch.js 的 handleFetchRequest() 用同一份邏輯，
+    // 但這個本機 Node entry 是自己組 request/response（沒有走 handleFetchRequest），
+    // 所以要在這裡另外特別處理一次，不能只改 apiFetch.js 那邊。
+    if (req.method === 'GET' && pathname === '/api/oauth/google/callback') {
+      const { redirectTo } = await handleGoogleOAuthCallback(url);
+      res.writeHead(302, { Location: redirectTo });
+      res.end();
+      return;
+    }
     if (pathname.startsWith('/api/')) {
       await handleApi(req, res, pathname, {
         // Explicit demo-only role switch mapped to a fixed server-side whitelist.
@@ -119,6 +130,10 @@ const server = http.createServer(async (req, res) => {
         // GS1/DPP 分層揭露示意（services/dpp）：public/customer/customs，跟上面的
         // demoRole（案件參與者角色）是不同軸線，故意分開一個查詢參數。
         dppRole: url.searchParams.get('role'),
+        // Google OAuth redirect_uri 要跟目前網域完全一致，見 workflowApi.js
+        // googleRedirectUri()——本機測試要記得把 http://localhost:3847/api/oauth/
+        // google/callback 也加進 Google Cloud Console 的已授權重新導向 URI。
+        origin: url.origin,
       });
       return;
     }

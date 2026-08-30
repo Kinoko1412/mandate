@@ -94,9 +94,22 @@
   function extractPrfBytes(credential) {
     const results = credential.getClientExtensionResults ? credential.getClientExtensionResults() : {};
     const prf = results && results.prf;
-    if (!prf) return { enabled: false, bytes: null };
-    if (!prf.enabled && prf.enabled !== undefined) return { enabled: false, bytes: null };
+    if (!prf) {
+      // 2026-08-29：使用者反映補打一次還是失敗，代表不是單純「時機沒抓好」那種偶發
+      // 問題——留一份完整的 clientExtensionResults 原始內容在 console，下次再發生時
+      // 才看得出來是「這台裝置的驗證器連 prf 物件都沒回」還是「有回但缺 first」，
+      // 沒辦法只憑猜的繼續加重試次數。
+      console.warn('[VaultCrypto] PRF extension missing from clientExtensionResults', results);
+      return { enabled: false, bytes: null };
+    }
+    if (!prf.enabled && prf.enabled !== undefined) {
+      console.warn('[VaultCrypto] PRF extension explicitly disabled by authenticator', results);
+      return { enabled: false, bytes: null };
+    }
     const first = prf.results && prf.results.first;
+    if (!first) {
+      console.warn('[VaultCrypto] PRF enabled but no results.first returned', results);
+    }
     return { enabled: true, bytes: first ? new Uint8Array(first) : null };
   }
 
@@ -208,7 +221,7 @@
       const salt = Core.base64ToBytes(status.prfSaltBase64);
       const credentialIdBytes = Core.base64ToBytes(status.credentialId);
 
-      const assertion = await navigator.credentials.get({
+      const requestAssertion = () => navigator.credentials.get({
         publicKey: {
           challenge: Core.randomBytes(32),
           allowCredentials: [{ id: credentialIdBytes, type: 'public-key' }],
@@ -216,7 +229,18 @@
           extensions: { prf: { eval: { first: salt } } },
         },
       });
-      const prf = extractPrfBytes(assertion);
+
+      let assertion = await requestAssertion();
+      let prf = extractPrfBytes(assertion);
+      if (!prf.bytes) {
+        // 2026-08-29：Windows Hello／Chrome 的 PRF 偶爾第一次斷言吐不出結果（CTAP2/TPM
+        // 溝通時機問題，不是裝置真的不支援——這正是使用者反映「有時候輸完 PIN 會報
+        // 不支援 PRF」的成因，devtools 裡重試幾乎都會成功）。用同一組 salt 補一次斷言，
+        // 跟 registerVerifierVaultKey() 註冊流程的補呼叫同一個道理；使用者要再驗證一次
+        // 裝置（多按一次指紋/PIN），但比起直接判死刑、要求換裝置合理很多。
+        assertion = await requestAssertion();
+        prf = extractPrfBytes(assertion);
+      }
       if (!prf.bytes) {
         const error = new Error('裝置的驗證器不支援 PRF 擴充。');
         error.code = 'WEBAUTHN_PRF_UNSUPPORTED';

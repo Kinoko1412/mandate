@@ -10,3 +10,5 @@ _backups/
 *.bak-*
 .tools/
 *.ptau
+.claude/settings.local.json
+.serena/

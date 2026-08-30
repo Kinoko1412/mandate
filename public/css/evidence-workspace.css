@@ -10,6 +10,150 @@
  * of a foreign graft.
  */
 
+/* ---- 2026-08-29：Importer「安全摘要」的安全計數（findings/missing evidence/
+   discrepancies/open issues）改成長條圖——這四項是同一單位（次數）的量值比較，
+   符合長條圖的用途；單一色相（沿用 --brand，不是類別色，因為這四項不是要互相
+   區分身份的序列），每列直接標數字，不需要另外做圖例。見 case-workflow.js 的
+   buildCountBarChart()。 ---- */
+.ew-bar-chart {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-top: 2px;
+}
+.ew-bar-row {
+  display: grid;
+  grid-template-columns: 112px 1fr 26px;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 12.5px;
+}
+.ew-bar-label {
+  color: var(--ink-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ew-bar-track {
+  position: relative;
+  display: block;
+  height: 10px;
+  background: var(--bg-inset);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.ew-bar-fill {
+  display: block;
+  height: 100%;
+  min-width: 3px;
+  background: var(--brand);
+  border-radius: 999px;
+  transition: width 0.4s ease;
+}
+.ew-bar-value {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-weight: 650;
+  color: var(--ink);
+}
+
+/* ---- 2026-08-29：角色切換轉場簾幕——移植自 STBI 轉場素材庫 #1「水面展開」。
+   clip-path 用 JS 算好設定（見 initRoleCurtain()），這裡只放固定的定位/顏色/初始
+   位置；transform/transition 的實際播放時序交給 playCurtainCover()/
+   playCurtainReveal() 用 inline style 控制，跟素材庫原本的做法一致。 ---- */
+.ew-role-curtain {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  pointer-events: none;
+  background: var(--brand);
+  transform: translate(-200%, 200%);
+  will-change: transform;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ---- 2026-08-29：封面改成 butterfly.js.org 風格的全螢幕 hero——大標題置中、
+   下面一行免責聲明用打字機效果逐字打出（見 case-workflow.js 的
+   startHeroTypewriter()），捲動箭頭導去 #workspace。螢幕閱讀器直接讀完整句
+   （.sr-only），不用等打字動畫跑完；正式標語跟 <title> 不變,這裡只是首屏視覺。 ---- */
+.ew-hero-cover {
+  position: relative;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: var(--space-6) var(--space-4);
+  overflow: hidden;
+  color: #fff;
+  background:
+    radial-gradient(120% 90% at 50% 0%, rgba(255,255,255,0.10) 0%, transparent 55%),
+    linear-gradient(165deg, var(--brand) 0%, var(--brand-deep) 55%, #16261f 100%);
+}
+.ew-hero-cover-eyebrow {
+  margin: 0 0 var(--space-3);
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.7);
+}
+.ew-hero-cover-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: clamp(2.5rem, 8.5vw, 6rem);
+  line-height: 1.08;
+  color: #fff;
+}
+.ew-hero-cover-sub {
+  margin: var(--space-4) 0 0;
+  min-height: 1.6em;
+  font-size: clamp(1rem, 2.1vw, 1.3rem);
+  color: rgba(255, 255, 255, 0.86);
+}
+.ew-hero-cursor {
+  display: inline-block;
+  margin-left: 2px;
+  animation: ewCursorBlink 1s step-end infinite;
+}
+@keyframes ewCursorBlink { 50% { opacity: 0; } }
+.ew-hero-cover-scroll {
+  position: absolute;
+  left: 50%;
+  bottom: var(--space-5);
+  transform: translateX(-50%);
+  width: 40px; height: 40px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  animation: ewScrollBounce 1.8s ease-in-out infinite;
+  transition: background var(--ease), border-color var(--ease);
+}
+.ew-hero-cover-scroll:hover { background: rgba(255, 255, 255, 0.18); border-color: rgba(255, 255, 255, 0.7); }
+@keyframes ewScrollBounce {
+  0%, 100% { transform: translate(-50%, 0); }
+  50% { transform: translate(-50%, 6px); }
+}
+@media (max-width: 640px) {
+  .ew-hero-cover { min-height: 88vh; }
+}
+
 /* ---- dev-tools disclosure: collapses the four-act console, role switcher,
    case-hero/service-strip and audit timeline behind one understated toggle,
    so first paint is just the clean evidence-upload flow. Nothing removed
@@ -42,6 +186,88 @@
 .dev-tools-panel[hidden] { display: none; }
 .dev-tools-panel > .role-switcher,
 .dev-tools-panel > .reset-control { margin: 0; }
+/* 2026-08-29：「提交年度資料」跟五個開關（手動輸入表單／Proof-Gate／RiskReport／
+   Grant／誠實邊界）並排同一列——提交按鈕在左、開關群在右，高度統一（開關本來只是
+   文字連結高度不到按鈕一半，這裡撐到跟 .button 一樣高，並排時不會忽高忽低）。
+   空間不夠時允許整排換行，不是硬擠成一行。 */
+.ew-submit-toggle-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-start;
+  gap: var(--space-4) var(--space-4);
+}
+.ew-inner-tool-toggle-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
+}
+.ew-inner-tool-toggle-row .dev-tools-toggle {
+  min-height: 42px;
+  display: inline-flex;
+  align-items: center;
+}
+
+/* ---- 2026-08-29：案件資訊（Installation/Reporting year/年度產量/年度強度）改成
+   左下角常駐的檔案卡——預設用 transform 藏到只剩標頭露出畫面，點標頭整卡往上滑開，
+   再點一次收回去（.open 由 case-workflow.js 的 setCaseCard() 切換）。fixed 定位，
+   跟其他角落常駐控制項（設定齒輪、抽屜開關）同一類。 ---- */
+.ew-case-card {
+  position: fixed;
+  left: 22px;
+  bottom: 0;
+  z-index: 46;
+  width: min(240px, calc(100vw - 44px));
+  background: var(--bg-elevated);
+  border: 1px solid var(--line);
+  border-bottom: none;
+  border-radius: var(--radius-max) var(--radius-max) 0 0;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.6) inset,
+    0 -2px 4px -2px rgba(26, 26, 24, 0.12),
+    0 -6px 12px -4px rgba(26, 26, 24, 0.14),
+    0 -16px 32px -12px rgba(26, 26, 24, 0.22),
+    0 -28px 48px -18px rgba(26, 26, 24, 0.18);
+  transform: translateY(calc(100% - 44px));
+  transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.ew-case-card.open { transform: translateY(0); }
+.ew-case-card-header {
+  width: 100%;
+  height: 44px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 14px;
+  border: none;
+  background: none;
+  font-weight: 650;
+  font-size: 13.5px;
+  color: var(--ink);
+  cursor: pointer;
+}
+.ew-case-card-chevron { display: inline-block; transition: transform 0.3s ease; color: var(--ink-muted); }
+.ew-case-card.open .ew-case-card-chevron { transform: rotate(180deg); }
+.ew-case-card-body {
+  margin: 0;
+  padding: 0 14px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ew-case-card-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--line);
+}
+.ew-case-card-row:last-child { border-bottom: none; padding-bottom: 0; }
+.ew-case-card-row dt { margin: 0; font-size: 12px; color: var(--ink-muted); white-space: nowrap; }
+.ew-case-card-row dd { margin: 0; font-weight: 650; text-align: right; }
 
 /* ---- Supplier view: strip the boxed-console look so first paint reads as
    a plain upload flow, not another technical panel. Scoped to #supplier-view
@@ -56,8 +282,21 @@
   max-width: 760px;
   margin-inline: auto;
 }
-.ew-op-wrap > .ew-index-panel {
+/* 2026-08-29：Evidence Index 改成滿版寬度——不跟著 .ew-op-wrap 的 760px 上傳流程
+   欄寬走，用「跳出父層置中欄」的標準技巧（負 margin 撐到視窗寬）,表格本身仍靠
+   .table-wrap 自己的 overflow-x:auto 處理超寬內容,不是讓整頁跟著橫向捲動。
+   用後代選擇器（不是直接子選擇器）——.ew-index-panel 實際上包在 #agent-view
+   裡面，不是 .ew-op-wrap 的直接子元素，用 > 完全比對不到，是這條規則一開始
+   沒生效的原因。 */
+.ew-op-wrap .ew-index-panel {
   margin-bottom: var(--space-4);
+  box-sizing: border-box;
+  /* 不直接設 width:100vw——100vw 在有捲軸的瀏覽器裡不會扣掉捲軸寬度，
+     會多出幾 px 造成整頁橫向捲動。改成不設寬度，純靠左右負 margin 把
+     寬度「撐」到視窗邊緣，寬度由負 margin 自然決定，不會超出視窗。 */
+  margin-left: calc(50% - 50vw);
+  margin-right: calc(50% - 50vw);
+  padding-inline: clamp(16px, 4vw, 48px);
 }
 
 /* ---- hero: the upload composer is the page's one focal element (Claude/
@@ -94,10 +333,6 @@
   border: none;
   background: transparent;
   padding: 0;
-}
-#manual-form-toggle,
-#supplier-tools-toggle {
-  margin: var(--space-3) 0 0;
 }
 #manual-form-panel {
   margin-bottom: var(--space-4);
@@ -276,19 +511,50 @@
   gap: var(--space-2);
 }
 .ew-modal-icon {
-  width: 56px;
-  height: 56px;
-  border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 30px;
-  line-height: 1;
-  color: #fff;
   margin-bottom: var(--space-2);
 }
-.ew-modal-icon.ok { background: var(--ok); }
-.ew-modal-icon.fail { background: var(--deny); }
+
+/* ---- 2026-08-29：提交結果改用「畫圈→畫勾/叉→色塊填滿→彈跳」的 SVG 描邊動畫，
+   取代原本靜態的 ✓/✕ 文字圖示。成功/失敗共用同一套動畫,只是 --icon-color 換成
+   var(--ok) 或 var(--deny)（跟其餘成功/失敗提示同一套色票,不是另外寫死顏色）。---- */
+.ew-anim-icon {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  display: block;
+  stroke-width: 2;
+  stroke-miterlimit: 10;
+  animation: ewIconFill .4s ease-in-out .4s forwards, ewIconScale .3s ease-in-out .9s both;
+}
+.ew-anim-icon.ok { --icon-color: var(--ok); box-shadow: inset 0 0 0 var(--icon-color); }
+.ew-anim-icon.fail { --icon-color: var(--deny); box-shadow: inset 0 0 0 var(--icon-color); }
+.ew-anim-circle {
+  stroke-dasharray: 166;
+  stroke-dashoffset: 166;
+  stroke-width: 2;
+  stroke-miterlimit: 10;
+  stroke: var(--icon-color);
+  fill: none;
+  animation: ewIconStroke .6s cubic-bezier(0.65, 0, 0.45, 1) forwards;
+}
+.ew-anim-check,
+.ew-anim-cross {
+  transform-origin: 50% 50%;
+  stroke: #fff;
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  fill: none;
+}
+.ew-anim-check { stroke-dasharray: 48; stroke-dashoffset: 48; animation: ewIconStroke .3s cubic-bezier(0.65, 0, 0.45, 1) .8s forwards; }
+.ew-anim-cross { stroke-dasharray: 60; stroke-dashoffset: 60; animation: ewIconStroke .3s cubic-bezier(0.65, 0, 0.45, 1) .8s forwards; }
+@keyframes ewIconStroke { 100% { stroke-dashoffset: 0; } }
+@keyframes ewIconScale { 0%, 100% { transform: none; } 50% { transform: scale3d(1.1, 1.1, 1); } }
+@keyframes ewIconFill { 100% { box-shadow: inset 0 0 0 30px var(--icon-color); } }
+
 .ew-modal-title { margin: 0; font-family: var(--font-display); font-size: 20px; }
 .ew-modal-message {
   margin: 0 0 var(--space-3);
@@ -297,6 +563,142 @@
   line-height: 1.5;
 }
 .ew-modal-card .button { min-width: 120px; }
+
+/* ---- 2026-08-29：chat「送出」按鈕改用玻璃感浮雕＋品牌色暈光的動畫樣式，
+   --glow-hue 是 var(--brand) #2F5D50 換算出的色相，跟按鈕底色同一個顏色家族，
+   不是另外套一組配色。---- */
+.ew-glow-btn {
+  --border-radius: var(--radius);
+  --padding: 3px;
+  --transition: 0.3s;
+  --glow-hue: 163deg;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background-color: var(--brand-deep);
+  border: solid 1px rgba(255, 255, 255, 0.18);
+  box-shadow:
+    inset 0 1px 1px rgba(255, 255, 255, 0.18),
+    inset 0 2px 2px rgba(255, 255, 255, 0.12),
+    inset 0 4px 4px rgba(255, 255, 255, 0.08),
+    0 -1px 1px rgba(0, 0, 0, 0.05),
+    0 -4px 6px rgba(0, 0, 0, 0.12);
+  transition: box-shadow var(--transition), border-color var(--transition), background-color var(--transition);
+}
+.ew-glow-btn::after {
+  content: "";
+  position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+  background-image: linear-gradient(0deg, #fff, hsl(var(--glow-hue) 70% 55%), transparent 60%);
+  opacity: 0;
+  mask-image: linear-gradient(0deg, #fff, transparent);
+  transition: opacity var(--transition);
+}
+.ew-glow-btn:hover::after,
+.ew-glow-btn:focus-visible::after { opacity: 0.5; }
+.ew-glow-btn:hover,
+.ew-glow-btn:focus-visible {
+  border-color: hsla(var(--glow-hue), 100%, 80%, 0.5);
+  box-shadow:
+    inset 0 1px 1px rgba(255, 255, 255, 0.3),
+    inset 0 2px 2px rgba(255, 255, 255, 0.18),
+    inset 0 4px 4px rgba(255, 255, 255, 0.1),
+    0 -1px 1px rgba(0, 0, 0, 0.05),
+    0 -4px 6px rgba(0, 0, 0, 0.12);
+}
+.ew-glow-btn:active {
+  background-color: hsl(var(--glow-hue) 45% 22%);
+  border-color: hsla(var(--glow-hue), 100%, 85%, 0.7);
+}
+.ew-glow-btn .btn-letter {
+  display: inline-block;
+  position: relative;
+  animation: ewLetterGlow 2.2s ease-in-out infinite;
+}
+@keyframes ewLetterGlow { 50% { text-shadow: 0 0 6px rgba(255, 255, 255, 0.75); } }
+
+/* 2026-08-29：加上左側閃爍圖示＋兩段文字交叉淡出（送出→傳送中），沿用同一顆按鈕
+   的玻璃感浮雕外殼與品牌色暈光，不是換一顆按鈕——.sending 由 sendChatUpload()
+   在真的送出等待 API 回應時加上/拿掉（原範例用 :focus 觸發，改成綁真實非同步
+   狀態才有意義，不然一按下去 focus 就觸發、跟有沒有在等待無關）。 */
+.ew-glow-btn .btn-svg {
+  width: 16px;
+  height: 16px;
+  color: rgba(255, 255, 255, 0.7);
+  animation: ewIconFlicker 2s linear infinite;
+  filter: drop-shadow(0 0 2px rgba(255, 255, 255, 0.5));
+  transition: color var(--transition), filter var(--transition);
+}
+.ew-glow-btn:hover .btn-svg,
+.ew-glow-btn:focus-visible .btn-svg {
+  color: #fff;
+  filter: drop-shadow(0 0 4px hsl(var(--glow-hue) 100% 70%));
+  animation: none;
+}
+@keyframes ewIconFlicker { 50% { opacity: 0.35; } }
+
+.ew-glow-btn .txt-wrapper {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  min-width: 3.2em;
+  height: 1.3em;
+}
+.ew-glow-btn .txt-1,
+.ew-glow-btn .txt-2 {
+  position: absolute;
+  left: 0;
+  white-space: nowrap;
+  transition: opacity 0.3s ease;
+}
+.ew-glow-btn .txt-2 { opacity: 0; }
+.ew-glow-btn.sending .txt-1 { opacity: 0; }
+.ew-glow-btn.sending .txt-2 { opacity: 1; }
+.ew-glow-btn.sending .btn-svg { animation-duration: 0.6s; }
+
+/* ---- 2026-08-29：真的會打 API、要等一下的按鈕（Evidence Agent 預審、重驗 Proof/Gate
+   這類 ZKP 驗證）改成 hover 時預留圖示槽、按下去展開顯示 loading spinner，完成後換成
+   打勾再自動收合。沿用既有 .button/var(--brand) 底色，只加這層展開＋圖示狀態。JS 由
+   runWithExpandButton() 依 loading/loaded/finished 三個 class 驅動,不是固定時間動畫。---- */
+.ew-expand-btn {
+  --ew-icon-slot: 34px;
+  position: relative;
+  overflow: hidden;
+  padding-right: 14px;
+  transition: padding-right .3s;
+}
+.ew-expand-btn .expand-icon {
+  position: absolute; top: 0; right: 0; bottom: 0;
+  width: var(--ew-icon-slot);
+  display: flex; align-items: center; justify-content: center;
+  border-left: 1px solid rgba(255, 255, 255, 0.3);
+  transform: translateX(calc(var(--ew-icon-slot) + 1px));
+  transition: transform .3s;
+}
+.ew-expand-btn .expand-icon svg { width: 15px; height: 15px; color: #fff; transition: transform .25s; }
+.ew-expand-btn .expand-icon svg.second { display: none; }
+.ew-expand-btn:hover,
+.ew-expand-btn.loading,
+.ew-expand-btn.loaded {
+  padding-right: calc(14px + var(--ew-icon-slot));
+}
+.ew-expand-btn:hover .expand-icon,
+.ew-expand-btn.loading .expand-icon,
+.ew-expand-btn.loaded .expand-icon { transform: translateX(0); }
+.ew-expand-btn .loader {
+  display: none;
+  width: 15px; height: 15px;
+  border: 2px solid #fff; border-left-color: transparent; border-right-color: transparent;
+  border-radius: 50%;
+  animation: ewExpandSpin 0.9s linear infinite;
+}
+.ew-expand-btn.loading .expand-icon svg { display: none; }
+.ew-expand-btn.loading .loader { display: inline-block; }
+.ew-expand-btn.loaded .loader { display: none; }
+.ew-expand-btn.loaded .expand-icon svg.first { display: none; }
+.ew-expand-btn.loaded .expand-icon svg.second { display: block; transform: scale(0); }
+.ew-expand-btn.loaded.finished .expand-icon svg.second { transform: scale(1); transition: transform .3s cubic-bezier(0.34, 1.56, 0.64, 1); }
+@keyframes ewExpandSpin { to { transform: rotate(360deg); } }
 
 .trust-check-list {
   list-style: none;
@@ -430,8 +832,29 @@
   transition: color var(--ease), border-color var(--ease), transform var(--ease);
 }
 .ew-settings-toggle:hover { color: var(--ink); border-color: var(--ink-faint); }
-.ew-settings-toggle.open { color: var(--brand); transform: rotate(30deg); }
-.ew-settings-toggle svg { width: 18px; height: 18px; stroke: currentColor; }
+.ew-settings-toggle.open { color: var(--brand); }
+
+/* ---- 2026-08-29：齒輪圖示改成漢堡選單↔X 的描邊動畫（三條線→旋轉合成一個 X），
+   顏色沿用 currentColor（跟既有 hover/.open 變色規則同一套），不是另外寫死顏色，
+   按鈕本身的圓形外框/陰影/位置完全不動。---- */
+.ew-settings-toggle .menu-icon-wrapper {
+  width: 20px;
+  height: 16px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+.ew-settings-toggle .menu-icon-line {
+  display: block;
+  width: 100%;
+  height: 2px;
+  border-radius: 2px;
+  background-color: currentColor;
+  transition: transform 300ms cubic-bezier(0.52, -0.8, 0.52, 0.52), opacity 200ms ease;
+}
+.ew-settings-toggle.open .menu-icon-line.first { transform: translateY(7px) rotate(45deg); }
+.ew-settings-toggle.open .menu-icon-line.last { transform: translateY(-7px) rotate(-45deg); }
+.ew-settings-toggle.open .menu-icon-line:not(.first):not(.last) { opacity: 0; }
 .ew-settings-scrim {
   position: fixed; inset: 0; background: rgba(26, 26, 24, 0.15);
   opacity: 0; pointer-events: none; transition: opacity 200ms ease; z-index: 40;
@@ -447,6 +870,29 @@
   display: flex; flex-direction: column; gap: 12px;
 }
 .ew-settings-panel[hidden] { display: none; }
+/* ---- 2026-08-29：面板改成從齒輪按鈕位置「長出來」的縮放＋淡入動畫，取代原本
+   [hidden] 屬性直接切 display 的瞬間跳出。JS 開啟時先拿掉 hidden、下一畫格才加
+   .open 觸發 transition；關閉時先拿掉 .open 播完退場動畫，才真的補回 hidden
+   （見 setSettingsPanel()），[hidden] 的 a11y 語意還在，只是多等一個 transition。---- */
+.ew-settings-panel:not([hidden]) {
+  transform-origin: top left;
+  opacity: 0;
+  transform: scale(0.4);
+  pointer-events: none;
+  transition: opacity .25s ease, transform .25s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.ew-settings-panel.open {
+  opacity: 1;
+  transform: scale(1);
+  pointer-events: auto;
+}
+.ew-settings-panel > * {
+  opacity: 0;
+  transform: translateY(-6px);
+  transition: opacity .25s ease, transform .25s ease;
+}
+.ew-settings-panel.open > * { opacity: 1; transform: translateY(0); transition-delay: .1s; }
+.ew-settings-panel.open > *:nth-child(2) { transition-delay: .18s; }
 
 /* ---- Agent / decision-maker view toggle — a real switch, not a segmented
    tab, matching the on/off metaphor the user asked for. ---- */
@@ -597,12 +1043,16 @@
   flex-shrink: 0;
 }
 .ew-hstep.done .ew-hstep-dot { background: var(--brand); border-color: var(--brand); }
-.ew-hstep.done .ew-hstep-dot::after {
-  content: "";
-  position: absolute; top: 50%; left: 50%;
-  width: 12px; height: 7px;
-  border-left: 2.5px solid #fff; border-bottom: 2.5px solid #fff;
-  transform: translate(-50%, -60%) rotate(-45deg);
+/* 2026-08-29：改用跟提交結果彈窗同一套 SVG 描邊動畫（見 .ew-anim-check），
+   取代原本純 CSS 邊框畫的靜態勾勾——只畫勾、不重複疊加填色動畫（背景色已經
+   是 .done 狀態的 var(--brand) 圓點本身）。 */
+.ew-hstep-dot svg.ew-hstep-check {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%;
+}
+.ew-hstep-dot svg.ew-hstep-check .ew-anim-check {
+  stroke-width: 4;
+  animation: ewIconStroke .3s cubic-bezier(0.65, 0, 0.45, 1) forwards;
 }
 .ew-hstep.problem .ew-hstep-dot { background: var(--alert); border-color: var(--alert); }
 .ew-hstep.problem .ew-hstep-dot::after {

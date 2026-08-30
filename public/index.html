@@ -12,7 +12,11 @@
 <body>
   <a class="skip-link" href="#workspace">跳到主要內容</a>
   <button type="button" class="ew-settings-toggle" id="settings-toggle" aria-label="設定與角色切換" aria-expanded="false" aria-controls="settings-panel">
-    <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09a1.65 1.65 0 00-1-1.51 1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09a1.65 1.65 0 001.51-1 1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+    <span class="menu-icon-wrapper" aria-hidden="true">
+      <span class="menu-icon-line first"></span>
+      <span class="menu-icon-line"></span>
+      <span class="menu-icon-line last"></span>
+    </span>
   </button>
   <div class="ew-settings-scrim" id="settings-scrim"></div>
   <div class="ew-settings-panel" id="settings-panel" hidden>
@@ -26,11 +30,14 @@
     <a href="legacy.html" class="ew-ghost-pill">舊版 PCF 介面參考</a>
   </div>
 
-  <header class="site-header">
-    <div>
-      <p class="eyebrow">Mandate · Evidence Workspace</p>
-      <h1>可信碳排證據 Agent</h1>
-    </div>
+  <header class="ew-hero-cover" id="ew-hero-cover">
+    <p class="ew-hero-cover-eyebrow">Mandate · Evidence Workspace</p>
+    <h1 class="ew-hero-cover-title">可信碳排證據 Agent</h1>
+    <p class="ew-hero-cover-sub">
+      <span class="sr-only">Prototype 僅供 Hackathon 展示；不包含正式 Agent、Registry、HSM 或官方提交。</span>
+      <span id="ew-hero-typewriter" aria-hidden="true"></span><span class="ew-hero-cursor" aria-hidden="true">|</span>
+    </p>
+    <button type="button" class="ew-hero-cover-scroll" id="ew-hero-scroll" aria-label="向下捲動到工作區">⌄</button>
   </header>
 
   <div class="dev-tools" id="dev-tools">
@@ -145,6 +152,12 @@
        任何角色都看得到。 -->
   <div class="ew-toast-stack" id="toast-stack" aria-live="polite"></div>
 
+  <!-- 2026-08-29：角色切換（Supplier/Importer/Verifier）轉場——移植自 STBI 轉場素材庫
+       #1「水面展開（左下→右上）」，對角波浪簾幕掃入蓋滿畫面、換好角色資料後再掃出。
+       clip-path 由 case-workflow.js 的 initRoleCurtain() 算好塞進來，見
+       playCurtainCover()/playCurtainReveal()。 -->
+  <div class="ew-role-curtain" id="role-transition-curtain" aria-hidden="true"></div>
+
   <main id="workspace" class="workspace">
     <section id="supplier-view" class="role-view" data-view="Supplier" aria-labelledby="supplier-title">
       <button type="button" class="ew-drawer-toggle" id="evidence-drawer-toggle" aria-label="展開已上傳文件" aria-expanded="false">
@@ -156,6 +169,22 @@
         <div class="ew-drawer-head">已上傳文件</div>
         <div class="ew-file-list" id="evidence-drawer-list"></div>
       </aside>
+
+      <!-- 2026-08-29：案件資訊（Installation/Reporting year/年度產量/年度強度）改成
+           左下角常駐的檔案卡，預設只露出標頭、點一下整卡往上滑開，再點一次縮回去——
+           不是跟 Evidence Index 並排的區塊了。見 case-workflow.js 的 setCaseCard()。 -->
+      <div class="ew-case-card" id="case-card">
+        <button type="button" class="ew-case-card-header" id="case-card-toggle" aria-expanded="false" aria-controls="case-card-body">
+          <span>案件資訊</span>
+          <span class="ew-case-card-chevron" aria-hidden="true">⌃</span>
+        </button>
+        <dl class="ew-case-card-body" id="case-card-body">
+          <div class="ew-case-card-row"><dt>廠區</dt><dd id="wheel-value-installation">—</dd></div>
+          <div class="ew-case-card-row"><dt>年度</dt><dd id="wheel-value-reportingYear">—</dd></div>
+          <div class="ew-case-card-row"><dt>年度產量</dt><dd id="wheel-value-production">—</dd></div>
+          <div class="ew-case-card-row"><dt>年度強度</dt><dd id="wheel-value-intensity">—</dd></div>
+        </dl>
+      </div>
 
       <div class="ew-op-wrap">
       <div class="ew-view-toggle-row">
@@ -183,7 +212,13 @@
             </button>
             <input type="file" id="chat-file-input" accept="image/png,image/jpeg,application/pdf" multiple hidden>
             <textarea id="chat-text-input" rows="1" placeholder="附加檔案，或直接問我問題…"></textarea>
-            <button type="button" class="button" id="chat-send-btn">送出</button>
+            <button type="button" class="button ew-glow-btn" id="chat-send-btn">
+              <svg class="btn-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09ZM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0 2.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 0 0-2.456 2.456ZM16.894 20.567 16.5 21.75l-.394-1.183a2.25 2.25 0 0 0-1.423-1.423L13.5 18.75l1.183-.394a2.25 2.25 0 0 0 1.423-1.423l.394-1.183.394 1.183a2.25 2.25 0 0 0 1.423 1.423l1.183.394-1.183.394a2.25 2.25 0 0 0-1.423 1.423Z"></path></svg>
+              <span class="txt-wrapper">
+                <span class="txt-1"><span class="btn-letter">送</span><span class="btn-letter">出</span></span>
+                <span class="txt-2"><span class="btn-letter">傳</span><span class="btn-letter">送</span><span class="btn-letter">中</span></span>
+              </span>
+            </button>
           </div>
           <div class="ew-chat-file-chip" id="chat-file-chip" hidden>
             <span id="chat-file-name"></span>
@@ -203,13 +238,33 @@
           <h3 id="supplier-index-title">Evidence Index</h3>
         </div>
         <div id="supplier-evidence" class="table-wrap" aria-live="polite"></div>
-        <button id="submit-case" class="button" type="button">提交年度資料</button>
+        <div class="ew-submit-toggle-row">
+          <button id="submit-case" class="button" type="button">提交年度資料</button>
+          <div class="ew-inner-tool-toggle-row">
+            <button type="button" class="dev-tools-toggle" id="manual-form-toggle" aria-expanded="false">
+              <span class="dev-tools-chevron" aria-hidden="true"></span>
+              <span id="manual-form-toggle-label">顯示手動輸入表單</span>
+            </button>
+            <button type="button" class="dev-tools-toggle inner-tool-toggle" id="trust-proof-section-toggle" aria-expanded="false">
+              <span class="dev-tools-chevron" aria-hidden="true"></span>
+              <span id="trust-proof-section-toggle-label">顯示 Proof / Gate 驗證明細</span>
+            </button>
+            <button type="button" class="dev-tools-toggle inner-tool-toggle" id="supplier-risk-section-toggle" aria-expanded="false">
+              <span class="dev-tools-chevron" aria-hidden="true"></span>
+              <span id="supplier-risk-section-toggle-label">顯示 Evidence Agent RiskReport</span>
+            </button>
+            <button type="button" class="dev-tools-toggle inner-tool-toggle" id="grant-section-toggle" aria-expanded="false">
+              <span class="dev-tools-chevron" aria-hidden="true"></span>
+              <span id="grant-section-toggle-label">顯示一次性短效 Grant</span>
+            </button>
+            <button type="button" class="dev-tools-toggle inner-tool-toggle" id="physical-boundary-section-toggle" aria-expanded="false">
+              <span class="dev-tools-chevron" aria-hidden="true"></span>
+              <span id="physical-boundary-section-toggle-label">顯示誠實邊界：物理真實</span>
+            </button>
+          </div>
+        </div>
       </section>
 
-      <button type="button" class="dev-tools-toggle" id="manual-form-toggle" aria-expanded="false">
-        <span class="dev-tools-chevron" aria-hidden="true"></span>
-        <span id="manual-form-toggle-label">顯示手動輸入表單</span>
-      </button>
       <div class="dev-tools-panel" id="manual-form-panel" hidden>
         <section class="panel" aria-labelledby="upload-title">
           <h3 id="upload-title">新增 Demo evidence（手動輸入）</h3>
@@ -254,31 +309,39 @@
         </section>
       </div>
 
-      <button type="button" class="dev-tools-toggle" id="supplier-tools-toggle" aria-expanded="false">
-        <span class="dev-tools-chevron" aria-hidden="true"></span>
-        <span id="supplier-tools-toggle-label">顯示案件資訊與進階工具</span>
-      </button>
-      <div class="dev-tools-panel" id="supplier-tools-panel" hidden>
-        <div class="button-row">
-          <button id="seed-evidence" class="button secondary" type="button">載入四份 synthetic Demo evidence</button>
-          <button id="run-agent-analysis" class="button" type="button">執行 Evidence Agent 預審</button>
-          <button id="revalidate-trust" class="button" type="button">重驗 Proof / Gate</button>
-        </div>
-
+      <div class="dev-tools-panel" id="trust-proof-section-panel" hidden>
         <section class="panel risk-panel" aria-labelledby="trust-proof-title">
           <h3 id="trust-proof-title">Proof / Gate 驗證明細</h3>
           <p class="privacy-note">按「重驗 Proof / Gate」後列出實際跑過的每一項檢查，含 real_zk_proof（真實 zk-SNARK 電路）。</p>
+          <button id="revalidate-trust" class="button ew-expand-btn" type="button">
+            <span>重驗 Proof / Gate</span>
+            <span class="expand-icon">
+              <span class="loader"></span>
+              <svg class="first" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+              <svg class="second" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 13l4 4L19 7"/></svg>
+            </span>
+          </button>
           <div id="trust-proof-checks" aria-live="polite">尚未重驗。</div>
         </section>
+      </div>
 
-        <div id="installation-cards" class="metric-grid" aria-live="polite"></div>
-
+      <div class="dev-tools-panel" id="supplier-risk-section-panel" hidden>
         <section class="panel risk-panel" aria-labelledby="supplier-risk-title">
           <h3 id="supplier-risk-title">Evidence Agent RiskReport</h3>
           <p class="privacy-note">衍生風險報告，不是底稿；預審不參與 Gate，也不代表 Agent 完成任何驗證。</p>
+          <button id="run-agent-analysis" class="button ew-expand-btn" type="button">
+            <span>執行 Evidence Agent 預審</span>
+            <span class="expand-icon">
+              <span class="loader"></span>
+              <svg class="first" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+              <svg class="second" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 13l4 4L19 7"/></svg>
+            </span>
+          </button>
           <div id="supplier-risk-report" aria-live="polite"></div>
         </section>
+      </div>
 
+      <div class="dev-tools-panel" id="grant-section-panel" hidden>
         <section class="panel grant-panel" aria-labelledby="grant-title">
           <div>
             <h3 id="grant-title">為 Demo Verifier 建立一次性短效 Grant</h3>
@@ -303,10 +366,12 @@
             </div>
           </div>
         </section>
+      </div>
 
-        <!-- 2026-08-29：從「顯示測試/開發工具」底下的四幕控制台搬過來——
-             原本要另外展開一個不同的收合面板才找得到，錄 Demo 時多一次不必要的
-             捲動/展開，這裡跟其他錄影步驟共用同一個面板。 -->
+      <!-- 2026-08-29：從「顯示測試/開發工具」底下的四幕控制台搬過來——
+           原本要另外展開一個不同的收合面板才找得到，錄 Demo 時多一次不必要的
+           捲動/展開，這裡跟其他錄影步驟共用同一個面板。 -->
+      <div class="dev-tools-panel" id="physical-boundary-section-panel" hidden>
         <section class="panel risk-panel" aria-labelledby="physical-boundary-title">
           <h3 id="physical-boundary-title">誠實邊界：物理真實</h3>
           <p class="privacy-note">文件數字一致不代表現場儀表正常或已校正。Commitment / Gate 只驗資料一致性，不證明物理真實。</p>
@@ -398,8 +463,11 @@
       </div>
       <section class="panel risk-panel" aria-labelledby="verifier-risk-title">
         <h3 id="verifier-risk-title">Evidence Agent RiskReport</h3>
-        <p class="privacy-note">這是衍生分析，不是 Vault 原始底稿；閱讀報告本身不會消耗 Grant。</p>
+        <p class="privacy-note" id="verifier-risk-note">這是衍生分析，不是 Vault 原始底稿；閱讀報告本身不會消耗 Grant。</p>
         <div id="verifier-risk-report" aria-live="polite"></div>
+        <div id="verifier-opened-image-wrap" hidden>
+          <img id="verifier-opened-image" class="opened-content-img-large" alt="">
+        </div>
       </section>
       <section class="panel">
         <h3>記錄 finding</h3>
@@ -419,9 +487,6 @@
     </section>
   </main>
 
-  <footer>
-    Prototype 僅供 Hackathon 展示；不包含 ZKP、正式 Agent、Registry、HSM 或官方提交。
-  </footer>
   <script src="js/vault-crypto-core.js" defer></script>
   <script src="js/vault-crypto.js" defer></script>
   <script src="js/case-workflow.js" defer></script>

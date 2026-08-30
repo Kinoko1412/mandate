@@ -306,6 +306,34 @@ function metric(label, value, note = '') {
   return article;
 }
 
+/**
+ * 案件資訊檔案卡（左下角常駐，預設收合只露標頭，點一下滑開/收回）：
+ * Installation／Reporting year／年度產量／年度強度四列。setCaseCard() 是開關，
+ * updateWheel() 每次案件資料刷新時更新四列顯示值。
+ */
+function setCaseCard(open) {
+  const card = $('case-card');
+  const toggle = $('case-card-toggle');
+  if (!card || !toggle) return;
+  card.classList.toggle('open', open);
+  toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+}
+
+function updateWheel(caseRecord) {
+  const year = caseRecord.installationYear || {};
+  const annual = (caseRecord.carbon && caseRecord.carbon.annual) || {};
+  const values = {
+    installation: year.installationId ?? '—',
+    reportingYear: year.reportingYear ?? '—',
+    production: `${year.productionTonnes ?? '—'} ${year.productionUnit || ''}`.trim(),
+    intensity: `${annual.intensity ?? '—'} ${annual.intensityUnit || ''}`.trim(),
+  };
+  Object.entries(values).forEach(([key, value]) => {
+    const el = $(`wheel-value-${key}`);
+    if (el) el.textContent = value;
+  });
+}
+
 function replaceChildren(target, children) {
   target.replaceChildren(...children);
 }
@@ -391,6 +419,37 @@ function textList(items, emptyText) {
     list.append(item);
   });
   return list;
+}
+
+/**
+ * 「安全計數」四項（findings/missing evidence/discrepancies/open issues）是同一
+ * 單位（次數）的量值比較，符合長條圖的用途（不是像案件資訊那四個不同單位的欄位）。
+ * 單一色相（沿用 --brand，不是類別色，因為這四項不是要互相區分身份的序列），
+ * 每列都直接標數字，不需要另外做圖例。
+ */
+function buildCountBarChart(items) {
+  const wrap = document.createElement('div');
+  wrap.className = 'ew-bar-chart';
+  const max = Math.max(1, ...items.map((item) => item.value));
+  items.forEach((item) => {
+    const row = document.createElement('div');
+    row.className = 'ew-bar-row';
+    const label = document.createElement('span');
+    label.className = 'ew-bar-label';
+    label.textContent = item.label;
+    const track = document.createElement('span');
+    track.className = 'ew-bar-track';
+    const fill = document.createElement('span');
+    fill.className = 'ew-bar-fill';
+    fill.style.width = `${Math.round((item.value / max) * 100)}%`;
+    track.append(fill);
+    const value = document.createElement('span');
+    value.className = 'ew-bar-value';
+    value.textContent = String(item.value);
+    row.append(label, track, value);
+    wrap.append(row);
+  });
+  return wrap;
 }
 
 function reportSection(title, child, variant, id) {
@@ -504,26 +563,19 @@ function renderAgentSafeSummary(summary) {
   const counts = summary.counts || {};
   replaceChildren(target, [
     document.createTextNode(`${summary.reviewStatus} · ${summary.modelVersion}`),
-    reportSection('安全計數', textList([
-      `findings: ${counts.findings || 0}`,
-      `missing evidence: ${counts.missingEvidence || 0}`,
-      `discrepancies: ${counts.discrepancies || 0}`,
-      `open issues: ${counts.openIssues || 0}`,
-    ], '尚無計數。')),
+    reportSection('安全計數', buildCountBarChart([
+      { label: 'findings', value: counts.findings || 0 },
+      { label: 'missing evidence', value: counts.missingEvidence || 0 },
+      { label: 'discrepancies', value: counts.discrepancies || 0 },
+      { label: 'open issues', value: counts.openIssues || 0 },
+    ])),
     reportSection('Reason codes', textList(summary.reasonCodes, '尚無 reason code。')),
     reportSection('Next actions', textList(summary.nextActions, '交由查驗員後續檢視。')),
   ]);
 }
 
 function renderSupplier(caseRecord) {
-  const year = caseRecord.installationYear || {};
-  const annual = caseRecord.carbon && caseRecord.carbon.annual || {};
-  replaceChildren($('installation-cards'), [
-    metric('Installation', year.installationId),
-    metric('Reporting year', year.reportingYear),
-    metric('年度產量', `${year.productionTonnes ?? '—'} ${year.productionUnit || ''}`),
-    metric('年度強度', `${annual.intensity ?? '—'} ${annual.intensityUnit || ''}`, 'Demo data'),
-  ]);
+  updateWheel(caseRecord);
   state.evidence = Array.isArray(caseRecord.evidence) ? caseRecord.evidence : [];
   renderSupplierEvidence();
   renderGrantControls();
@@ -889,6 +941,7 @@ function renderRequiredStepper() {
     step.className = 'ew-hstep' + (issue ? ' problem' : isDone ? ' done' : '');
     const dot = document.createElement('span');
     dot.className = 'ew-hstep-dot';
+    if (!issue && isDone) dot.appendChild(buildStepCheckIcon());
     const label = document.createElement('span');
     label.className = 'ew-hstep-label';
     label.textContent = REQUIRED_TYPE_LABELS[type] || type;
@@ -1004,15 +1057,60 @@ function setManualForm(open) {
   if (label) label.textContent = open ? '收起手動輸入表單' : '顯示手動輸入表單';
 }
 
-function setSupplierTools(open) {
-  const toggle = $('supplier-tools-toggle');
-  const panel = $('supplier-tools-panel');
-  const label = $('supplier-tools-toggle-label');
+/**
+ * Proof/Gate 明細、RiskReport、一次性短效 Grant、物理真實邊界四塊各自獨立收合，
+ * 開關跟「顯示手動輸入表單」並排在同一列（不是誰的子類別），跟 setManualForm() 用
+ * 同一種 toggle+dev-tools-panel 寫法，只是這裡有四組、用資料表驅動避免重複四次
+ * 一樣的函式。
+ */
+const INNER_TOOL_TOGGLES = [
+  { toggle: 'trust-proof-section-toggle', panel: 'trust-proof-section-panel', label: 'trust-proof-section-toggle-label', name: 'Proof / Gate 驗證明細' },
+  { toggle: 'supplier-risk-section-toggle', panel: 'supplier-risk-section-panel', label: 'supplier-risk-section-toggle-label', name: 'Evidence Agent RiskReport' },
+  { toggle: 'grant-section-toggle', panel: 'grant-section-panel', label: 'grant-section-toggle-label', name: '一次性短效 Grant' },
+  { toggle: 'physical-boundary-section-toggle', panel: 'physical-boundary-section-panel', label: 'physical-boundary-section-toggle-label', name: '誠實邊界：物理真實' },
+];
+
+function setInnerTool(entry, open) {
+  const toggle = $(entry.toggle);
+  const panel = $(entry.panel);
+  const label = $(entry.label);
   if (!toggle || !panel) return;
   panel.hidden = !open;
   toggle.classList.toggle('open', open);
   toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
-  if (label) label.textContent = open ? '收起案件資訊與進階工具' : '顯示案件資訊與進階工具';
+  if (label) label.textContent = `${open ? '收起' : '顯示'} ${entry.name}`;
+}
+
+function bindInnerToolToggles() {
+  INNER_TOOL_TOGGLES.forEach((entry) => {
+    const toggle = $(entry.toggle);
+    const panel = $(entry.panel);
+    if (!toggle || !panel) return;
+    toggle.addEventListener('click', () => setInnerTool(entry, panel.hidden));
+  });
+}
+
+/**
+ * 「執行 Evidence Agent 預審」「重驗 Proof / Gate」這類真的會打 API、要等一下的按鈕，
+ * 改成 hover 展開一個圓形圖示槽、按下去圖示槽滑出來顯示 loading spinner，完成後
+ * 圖示換成打勾再自動收合——比單純 disabled+變灰更明確地告訴使用者「正在等」跟
+ * 「做完了」。跟 setBusy() 的全域忙碌狀態互不衝突，各自獨立疊加。
+ */
+async function runWithExpandButton(button, taskFn) {
+  if (!button) return taskFn();
+  button.classList.remove('loaded', 'finished');
+  button.classList.add('loading');
+  try {
+    const result = await taskFn();
+    button.classList.remove('loading');
+    button.classList.add('loaded');
+    requestAnimationFrame(() => button.classList.add('finished'));
+    setTimeout(() => button.classList.remove('loaded', 'finished'), 1800);
+    return result;
+  } catch (error) {
+    button.classList.remove('loading');
+    throw error;
+  }
 }
 
 function setEvidenceDrawer(open) {
@@ -1383,25 +1481,102 @@ async function loadRole() {
   await refreshAudit();
 }
 
+/**
+ * 角色切換轉場——移植自 STBI 轉場素材庫 #1「水面展開（左下→右上）」：對角波浪簾幕
+ * 從左下角掃入蓋滿畫面，蓋滿當下才真的切換角色資料（使用者看不到切換瞬間的硬切），
+ * 資料載入完成後再繼續往右上掃出、露出新角色畫面。clip-path 算法（diagonalWavePolygon）
+ * 直接照抄素材庫原始實作，只是顏色從素材庫的 accent 黃改成專案自己的 --brand 綠。
+ */
+function diagonalWavePolygon(waves, amp) {
+  const steps = 44;
+  const offset = -60;
+  const size = 220;
+  const raw = [[offset, offset], [offset, offset + size]];
+  for (let i = steps; i >= 0; i -= 1) {
+    const y = offset + (i / steps) * size;
+    const x = offset + size - amp / 2 + Math.sin((i / steps) * Math.PI * 2 * waves) * (amp / 2);
+    raw.push([x, y]);
+  }
+  const cx = offset + size / 2;
+  const cy = offset + size / 2;
+  const rad = (-45 * Math.PI) / 180;
+  const pts = raw.map(([x, y]) => {
+    const dx = x - cx;
+    const dy = y - cy;
+    const rx = cx + dx * Math.cos(rad) - dy * Math.sin(rad);
+    const ry = cy + dx * Math.sin(rad) + dy * Math.cos(rad);
+    return `${rx.toFixed(1)}% ${ry.toFixed(1)}%`;
+  });
+  return `polygon(${pts.join(', ')})`;
+}
+
+const ROLE_CURTAIN_MS = 480;
+const ROLE_CURTAIN_EASE = 'cubic-bezier(.65,0,.35,1)';
+
+function initRoleCurtain() {
+  const curtain = $('role-transition-curtain');
+  if (!curtain) return;
+  curtain.style.clipPath = diagonalWavePolygon(2, 16);
+}
+
+function playCurtainCover() {
+  const curtain = $('role-transition-curtain');
+  if (!curtain) return Promise.resolve();
+  return new Promise((resolve) => {
+    curtain.style.transition = `transform ${ROLE_CURTAIN_MS}ms ${ROLE_CURTAIN_EASE}`;
+    curtain.style.transform = 'translate(0%, 0%)';
+    setTimeout(resolve, ROLE_CURTAIN_MS);
+  });
+}
+
+function playCurtainReveal() {
+  const curtain = $('role-transition-curtain');
+  if (!curtain) return Promise.resolve();
+  return new Promise((resolve) => {
+    curtain.style.transition = `transform ${ROLE_CURTAIN_MS}ms ${ROLE_CURTAIN_EASE}`;
+    curtain.style.transform = 'translate(200%, -200%)';
+    setTimeout(() => {
+      curtain.style.transition = 'none';
+      curtain.style.transform = 'translate(-200%, 200%)';
+      resolve();
+    }, ROLE_CURTAIN_MS);
+  });
+}
+
+let roleCurtainReady = false;
+let switchRoleInFlight = false;
+
 async function switchRole(role) {
   if (!['Supplier', 'Importer', 'Verifier'].includes(role)) return;
-  if (role !== 'Supplier' && state.grant && state.grant.justCreated) {
-    saveGrant({ ...state.grant, justCreated: false });
+  // 轉場簾幕蓋滿/掃出中途沒有重入保護的話，錄影時手滑連點角色按鈕會疊出好幾輪
+  // cover/reveal 動畫互相搶跑，畫面會閃爍——切換中直接忽略新的請求，不排隊。
+  if (switchRoleInFlight) return;
+  switchRoleInFlight = true;
+  try {
+    const isActualSwitch = roleCurtainReady && role !== state.role;
+    if (role !== 'Supplier' && state.grant && state.grant.justCreated) {
+      saveGrant({ ...state.grant, justCreated: false });
+    }
+    $('token-once').hidden = true;
+    $('grant-token').textContent = '';
+    $('verifier-token').value = '';
+    $('opened-content').textContent = '';
+    $('opened-evidence').hidden = true;
+    if (isActualSwitch) await playCurtainCover();
+    state.role = role;
+    applyRoleControls();
+    document.querySelectorAll('.role-button').forEach((button) => {
+      button.setAttribute('aria-pressed', String(button.dataset.role === role));
+    });
+    document.querySelectorAll('.role-view').forEach((view) => {
+      view.hidden = view.dataset.view !== role;
+    });
+    await runAction(loadRole);
+    if (isActualSwitch) await playCurtainReveal();
+    roleCurtainReady = true;
+  } finally {
+    switchRoleInFlight = false;
   }
-  $('token-once').hidden = true;
-  $('grant-token').textContent = '';
-  $('verifier-token').value = '';
-  $('opened-content').textContent = '';
-  $('opened-evidence').hidden = true;
-  state.role = role;
-  applyRoleControls();
-  document.querySelectorAll('.role-button').forEach((button) => {
-    button.setAttribute('aria-pressed', String(button.dataset.role === role));
-  });
-  document.querySelectorAll('.role-view').forEach((view) => {
-    view.hidden = view.dataset.view !== role;
-  });
-  await runAction(loadRole);
 }
 
 async function refreshAudit() {
@@ -1770,6 +1945,34 @@ function closeLightbox() {
   $('chat-lightbox-img').src = '';
 }
 
+const SVG_NS = 'http://www.w3.org/2000/svg';
+function svgEl(tag, attrs) {
+  const el = document.createElementNS(SVG_NS, tag);
+  Object.entries(attrs || {}).forEach(([key, value]) => el.setAttribute(key, value));
+  return el;
+}
+
+/**
+ * 提交結果彈窗與必要文件 stepper 共用的「畫圈→畫勾/叉→色塊填滿→彈跳」SVG 動畫
+ * 圖示，見 evidence-workspace.css 的 .ew-anim-* 規則。buildResultIcon() 是彈窗用的
+ * 完整版（含圓圈描邊＋色塊填滿），buildStepCheckIcon() 是 stepper 用的輕量版
+ * （只畫勾，圓點背景色沿用既有 .ew-hstep.done 的 var(--brand)，不重複疊加填色）。
+ */
+function buildResultIcon(success) {
+  const svg = svgEl('svg', { viewBox: '0 0 52 52', class: 'ew-anim-icon ' + (success ? 'ok' : 'fail') });
+  svg.appendChild(svgEl('circle', { class: 'ew-anim-circle', cx: '26', cy: '26', r: '25' }));
+  svg.appendChild(svgEl('path', {
+    class: success ? 'ew-anim-check' : 'ew-anim-cross',
+    d: success ? 'M14.1 27.2l7.1 7.2 16.7-16.8' : 'M16 16 36 36 M36 16 16 36',
+  }));
+  return svg;
+}
+function buildStepCheckIcon() {
+  const svg = svgEl('svg', { viewBox: '0 0 52 52', class: 'ew-hstep-check' });
+  svg.appendChild(svgEl('path', { class: 'ew-anim-check', d: 'M14.1 27.2l7.1 7.2 16.7-16.8' }));
+  return svg;
+}
+
 /**
  * 2026-08-29：「提交年度資料」原本成功/失敗都只在頁面最上方留一行文字，錄影時鏡頭前
  * 不夠明確。改成置中彈出視窗：成功一個綠色勾勾＋「已成功提交」；失敗一個紅色叉叉＋
@@ -1778,8 +1981,8 @@ function closeLightbox() {
  */
 function showSubmitResultModal({ success, message }) {
   const icon = $('submit-result-icon');
-  icon.className = 'ew-modal-icon ' + (success ? 'ok' : 'fail');
-  icon.textContent = success ? '✓' : '✕';
+  icon.className = 'ew-modal-icon';
+  replaceChildren(icon, [buildResultIcon(success)]);
   $('submit-result-title').textContent = success ? '已成功提交' : '未成功提交';
   $('submit-result-message').textContent = message || '';
   $('submit-result-modal').hidden = false;
@@ -2072,6 +2275,7 @@ async function sendChatUpload() {
 
   const sendBtn = $('chat-send-btn');
   sendBtn.disabled = true;
+  sendBtn.classList.add('sending');
   const meta = { filename, displayName, mediaType, contentBase64 };
   const result = await runAction(
     () =>
@@ -2087,6 +2291,7 @@ async function sendChatUpload() {
     }
   );
   sendBtn.disabled = false;
+  sendBtn.classList.remove('sending');
   if (result) {
     appendChatMessage({ role: 'ai', node: buildEntryPreviewNode(result, meta) });
     pushChatHistory('assistant', summarizeResultForHistory(result));
@@ -2122,35 +2327,6 @@ async function handleUpload(event) {
   );
   if (result) {
     delete state.uploadIssues[input.type];
-    await runAction(loadRole);
-  }
-}
-
-async function seedEvidence() {
-  let created = 0;
-  let skipped = 0;
-  const result = await runAction(async () => {
-    for (const seed of DEMO_EVIDENCE) {
-      try {
-        await uploadEvidence({
-          type: seed.type,
-          filename: seed.filename,
-          content: JSON.stringify({ entries: seed.entries }),
-          mediaType: 'application/json',
-          coveredFrom: '2026-01-01',
-          coveredTo: '2026-12-31',
-          source: `synthetic-demo-${seed.type}`,
-        });
-        created += 1;
-      } catch (error) {
-        if (error.code === 'EVIDENCE_ALREADY_EXISTS') skipped += 1;
-        else throw error;
-      }
-    }
-    return true;
-  });
-  if (result) {
-    showNotice(`Synthetic Demo evidence：新增 ${created} 份，既有 ${skipped} 份。`);
     await runAction(loadRole);
   }
 }
@@ -2297,13 +2473,13 @@ async function analyzeCase() {
           // 兩種都有的話優先跳 Missing evidence；都沒有（理論上不會發生，因為沒異常
           // 就不會跳這則 toast）就退回捲到面板最上面。
           onAction: () => {
-            setSupplierTools(true);
+            setInnerTool(INNER_TOOL_TOGGLES[1], true);
             const target =
               (result.report.missingEvidence || []).length
                 ? $('report-section-missing-evidence')
                 : (result.report.discrepancies || []).length
                   ? $('report-section-discrepancies')
-                  : $('supplier-tools-panel');
+                  : $('supplier-risk-section-panel');
             // behavior:'auto'（瞬間跳轉）不是 'smooth'——實測過面板內容長、平滑捲動要跑
             // 好幾秒才捲到定位，錄 Demo 每一秒都珍貴，不該讓觀眾等一段捲動動畫。
             target.scrollIntoView({ behavior: 'auto', block: 'start' });
@@ -2649,11 +2825,21 @@ async function accessEvidence(mode) {
     const opened = $('opened-content');
     opened.replaceChildren();
     if (result.evidence.mediaType && result.evidence.mediaType.startsWith('image/')) {
+      const dataUrl = `data:${result.evidence.mediaType};base64,${VaultCryptoCore.bytesToBase64(plaintextBytes)}`;
       const img = document.createElement('img');
       img.className = 'opened-content-img';
       img.alt = result.evidence.filename || '底稿預覽';
-      img.src = `data:${result.evidence.mediaType};base64,${VaultCryptoCore.bytesToBase64(plaintextBytes)}`;
+      img.src = dataUrl;
       opened.appendChild(img);
+      // 2026-08-29：圖片底稿另外在下面全寬的 RiskReport 區塊放大顯示一份——
+      // 使用者反饋「這樣底稿頁面比較大、看得清楚」，同一張圖不用另外重新解密，
+      // 直接複用剛剛算好的 dataUrl。closeEvidence() 會把這裡收回去。
+      $('verifier-risk-report').hidden = true;
+      $('verifier-risk-title').textContent = '底稿預覽（開啟一次）';
+      $('verifier-risk-note').textContent = '這是剛剛開啟的原始底稿，不是衍生分析；關閉底稿後會換回 RiskReport。';
+      $('verifier-opened-image').src = dataUrl;
+      $('verifier-opened-image').alt = result.evidence.filename || '底稿預覽（大圖）';
+      $('verifier-opened-image-wrap').hidden = false;
     } else {
       opened.textContent = VaultCryptoCore.bytesToUtf8(plaintextBytes);
     }
@@ -2683,6 +2869,11 @@ function closeEvidence() {
   $('opened-content').textContent = '';
   $('opened-evidence').hidden = true;
   $('verifier-token').value = '';
+  $('verifier-opened-image').src = '';
+  $('verifier-opened-image-wrap').hidden = true;
+  $('verifier-risk-report').hidden = false;
+  $('verifier-risk-title').textContent = 'Evidence Agent RiskReport';
+  $('verifier-risk-note').textContent = '這是衍生分析，不是 Vault 原始底稿；閱讀報告本身不會消耗 Grant。';
   showNotice('底稿內容已從畫面記憶體清除。');
 }
 
@@ -2722,20 +2913,29 @@ function bindEvents() {
   $('dev-tools-toggle').addEventListener('click', () => {
     setDevTools($('dev-tools-panel').hidden);
   });
-  $('supplier-tools-toggle').addEventListener('click', () => {
-    setSupplierTools($('supplier-tools-panel').hidden);
-  });
   $('manual-form-toggle').addEventListener('click', () => {
     setManualForm($('manual-form-panel').hidden);
+  });
+  bindInnerToolToggles();
+  $('case-card-toggle').addEventListener('click', () => {
+    setCaseCard(!$('case-card').classList.contains('open'));
   });
   const settingsToggle = $('settings-toggle');
   const settingsPanel = $('settings-panel');
   const settingsScrim = $('settings-scrim');
   function setSettingsPanel(open) {
-    settingsPanel.hidden = !open;
     settingsScrim.classList.toggle('open', open);
     settingsToggle.classList.toggle('open', open);
     settingsToggle.setAttribute('aria-expanded', String(open));
+    if (open) {
+      settingsPanel.hidden = false;
+      requestAnimationFrame(() => requestAnimationFrame(() => settingsPanel.classList.add('open')));
+    } else {
+      settingsPanel.classList.remove('open');
+      setTimeout(() => {
+        if (!settingsPanel.classList.contains('open')) settingsPanel.hidden = true;
+      }, 260);
+    }
   }
   settingsToggle.addEventListener('click', () => setSettingsPanel(settingsPanel.hidden));
   settingsScrim.addEventListener('click', () => setSettingsPanel(false));
@@ -2777,9 +2977,12 @@ function bindEvents() {
     setEvidenceDrawer(!$('evidence-drawer').classList.contains('open'));
   });
   $('evidence-drawer-scrim').addEventListener('click', () => setEvidenceDrawer(false));
-  $('seed-evidence').addEventListener('click', seedEvidence);
-  $('run-agent-analysis').addEventListener('click', analyzeCase);
-  $('revalidate-trust').addEventListener('click', revalidateTrust);
+  $('run-agent-analysis').addEventListener('click', () => {
+    runWithExpandButton($('run-agent-analysis'), analyzeCase);
+  });
+  $('revalidate-trust').addEventListener('click', () => {
+    runWithExpandButton($('revalidate-trust'), revalidateTrust);
+  });
   $('submit-case').addEventListener('click', submitCase);
   $('create-grant').addEventListener('click', createGrant);
   $('revoke-grant').addEventListener('click', revokeGrant);
@@ -2801,7 +3004,38 @@ function bindEvents() {
   $('run-act-4').addEventListener('click', runPhysicalBoundary);
 }
 
+/**
+ * 封面 hero（butterfly.js.org 風格）：免責聲明用打字機效果逐字打出。完整文字已經
+ * 用 .sr-only 放好給螢幕閱讀器，這裡純粹是視覺效果，不影響 a11y；
+ * prefers-reduced-motion 時直接顯示完整文字，不跑逐字動畫。捲動箭頭導去
+ * #workspace，跟頁面左上角 skip-link 用同一個錨點。
+ */
+function initHeroCover() {
+  const scrollBtn = $('ew-hero-scroll');
+  if (scrollBtn) {
+    scrollBtn.addEventListener('click', () => {
+      $('workspace').scrollIntoView({ behavior: 'smooth' });
+    });
+  }
+  const target = $('ew-hero-typewriter');
+  if (!target) return;
+  const text = 'Prototype 僅供 Hackathon 展示；不包含正式 Agent、Registry、HSM 或官方提交。';
+  if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    target.textContent = text;
+    return;
+  }
+  let i = 0;
+  const tick = () => {
+    target.textContent = text.slice(0, i);
+    i += 1;
+    if (i <= text.length) setTimeout(tick, 45);
+  };
+  tick();
+}
+
 bindEvents();
+initHeroCover();
+initRoleCurtain();
 switchRole('Supplier');
 showToast({
   key: 'demo-disclaimer',
