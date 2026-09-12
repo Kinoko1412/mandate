@@ -33,6 +33,10 @@ function applyWorkerEnv(env) {
   if (env.SUPABASE_SERVICE_KEY != null) process.env.SUPABASE_SERVICE_KEY = env.SUPABASE_SERVICE_KEY;
   if (env.GOOGLE_CLIENT_ID != null) process.env.GOOGLE_CLIENT_ID = env.GOOGLE_CLIENT_ID;
   if (env.GOOGLE_CLIENT_SECRET != null) process.env.GOOGLE_CLIENT_SECRET = env.GOOGLE_CLIENT_SECRET;
+  // RFC 3161 時戳(見 docs/trust/RFC3161_TIMESTAMP_PLAN.md、services/timestamp/)——
+  // 預設關閉,只有明確設這個變數才會在 revalidateCase() 對外打真實 TSA 網路請求,
+  // 避免 tests/trust/smoke.js 等既有測試套件在沒設這個變數時意外連上真實網路。
+  if (env.ENABLE_RFC3161_TIMESTAMP != null) process.env.ENABLE_RFC3161_TIMESTAMP = env.ENABLE_RFC3161_TIMESTAMP;
 }
 
 /**

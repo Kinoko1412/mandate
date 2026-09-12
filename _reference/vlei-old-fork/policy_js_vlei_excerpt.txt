@@ -1,0 +1,50 @@
+10-  checkVerificationConsistency,
+11-} = require('./pcfCheck');
+12:const { verifySupplierCredentialChain } = require('./vleiCheck');
+13-
+14-const TOOL_REGISTRY = new Set([
+15-  'request_emissions',
+16-  'fetch_supplier_response',
+17-  'ingest_pcf_payload',
+18-  'submit_cbam_draft',
+19-  'commit_cbam_draft',
+20-  'revoke_data_share',
+21-  'export_sensitive',
+22-  'export_client_draft',
+23-  'export_audit',
+24-  'change_mandate',
+25-  'revoke_mandate',
+26-  'revoke_supplier_credential',
+27-]);
+--
+345-  } = ctx;
+346-
+347:  const vleiCheckedTools = new Set(['fetch_supplier_response', 'ingest_pcf_payload']);
+348:  if (vleiCheckedTools.has(toolName) && supplierId && typeof getSupplier === 'function') {
+349-    const supplier = getSupplier(supplierId);
+350-    const chain = verifySupplierCredentialChain(supplier);
+351-    if (!chain.valid) {
+352-      return {
+353-        trace: traceEntry(STEP_META[3], 'fail', {
+354-          policyId: 'POL-CRED-001',
+355:          detail: `供應商 ${supplierId} 的 vLEI 憑證鏈無效（${chain.chainStatus}）：${chain.detail}`,
+356-        }),
+357-        outcome: result(
+358-          'DENY_CONSTRAINT',
+359-          'POL-CRED-001',
+360:          `Supplier vLEI credential chain invalid (${chain.chainStatus}): ${chain.detail}`
+361-        ),
+362-      };
+363-    }
+364-  }
+365-
+366-  const shareRevokedTools = new Set([
+367-    'ingest_pcf_payload',
+368-    'submit_cbam_draft',
+369-    'fetch_supplier_response',
+370-    'commit_cbam_draft',
+371-    'export_client_draft',
+372-  ]);
+373-  if (shareRevokedTools.has(toolName) && isShareRevoked(supplierId, revokedShares)) {
+374-    return {
+375-      trace: traceEntry(STEP_META[3], 'fail', {

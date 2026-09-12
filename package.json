@@ -22,7 +22,9 @@
     "smoke:credential": "node tests/credential/smoke.js",
     "smoke:vault-crypto": "node tests/vault/crypto.smoke.js",
     "smoke:vault-keys": "node tests/vault/keys.smoke.js",
-    "smoke:workers-compat": "node tests/proof/workersWasmCompat.smoke.js"
+    "smoke:workers-compat": "node tests/proof/workersWasmCompat.smoke.js",
+    "test:timestamp": "node --test tests/timestamp/rfc3161.unit.js",
+    "smoke:timestamp": "node tests/timestamp/rfc3161.integration.smoke.js"
   },
   "devDependencies": {
     "ajv": "^8.20.0",
@@ -31,7 +33,13 @@
     "wrangler": "^4.24.0"
   },
   "dependencies": {
+    "@peculiar/asn1-cms": "^2.9.4",
+    "@peculiar/asn1-schema": "^2.9.4",
+    "@peculiar/asn1-tsp": "^2.9.4",
+    "@peculiar/asn1-x509": "^2.9.4",
+    "asn1js": "^3.0.10",
     "pdfjs-dist": "^4.10.38",
+    "pkijs": "^3.4.0",
     "snarkjs": "^0.7.6"
   }
 }

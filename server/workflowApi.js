@@ -12,6 +12,7 @@ const vaultKeys = require('./vaultKeys');
 const googleTokens = require('./googleTokens');
 const googleApi = require('../services/notify/google');
 const { ROLES: DPP_ROLES, buildLayeredDisclosure } = require('../services/dpp');
+const timestampService = require('../services/timestamp');
 
 const MAX_EVIDENCE_BYTES = 512 * 1024;
 const MAX_EVIDENCE_PER_CASE = 16;
@@ -835,6 +836,41 @@ function submitCase(actor, caseId) {
   }
 }
 
+/**
+ * RFC 3161 時戳(見 docs/trust/RFC3161_TIMESTAMP_PLAN.md、services/timestamp/)。
+ * 只在 Gate 判 GATE_OK(`gate.inputHash` 有值,見 server/trustAdapter.js 的 finalize())
+ * 時才時戳——這是整個信任閘門層唯一的「已建立事實」時刻,NEEDS_EVIDENCE/BLOCKED 狀態
+ * 都還在流程中,時戳沒有意義。
+ *
+ * 預設關閉(`ENABLE_RFC3161_TIMESTAMP` 環境變數未設時直接回傳 null),原因:
+ *   1. 這是增量能力,不是放行的必要條件——時戳完全失敗(TSA 打不通)也不該影響
+ *      revalidateCase() 本身的成功回應,`requestTimestamp()` 本身已經設計成不拋例外、
+ *      用 status 欄位表達成敗（見 services/timestamp/index.js），這裡只是單純呼叫。
+ *   2. 更重要的是：tests/trust/smoke.js 等既有 43+ 項測試都會呼叫到 revalidateCase()，
+ *      如果沒有這道開關，會讓這些原本完全離線的測試意外連上真實 DigiCert/Sectigo 網路，
+ *      違反這個 repo 自己的測試哲學（見 services/timestamp/ 三份文件反覆強調的
+ *      「不放進預設 npm test」原則）。真正驗證這條路徑用的是
+ *      tests/workflow/timestampIntegration.smoke.js，會自己开这个开关。
+ *
+ * 這裡選擇「await 同步等待」而不是 Cloudflare Workers 的 `ctx.waitUntil()` 背景執行：
+ * workflowApi.js 目前完全不持有 ExecutionContext，要接 waitUntil() 需要往上改動
+ * worker/index.js 的 DO fetch handler 簽名，牽動範圍變大；這個 endpoint 本來就不是
+ * 高頻/低延遲要求的路徑（demo 供應商手動按「重新驗證」），多等 TSA 一次網路來回
+ * （實測約 1 秒，見 實驗記錄/RFC3161_TSA連通性測試_20260911.md）換取實作簡單、
+ * 風險低，是刻意的取捨，不是沒想到 waitUntil()。
+ */
+async function timestampGateResultIfEnabled(caseId, gate) {
+  if (process.env.ENABLE_RFC3161_TIMESTAMP !== 'true') return null;
+  if (!gate || !gate.inputHash) return null;
+  const canonicalPayload = JSON.stringify({
+    caseId,
+    inputHash: gate.inputHash,
+    verification: gate.verification,
+    reasonCodes: gate.reasonCodes || [],
+  });
+  return timestampService.requestTimestamp(canonicalPayload);
+}
+
 async function revalidateCase(actor) {
   const caseId = workflowStore.DEMO_CASE_ID;
   const scope = requireCase(actor, caseId, 'Supplier');
@@ -851,6 +887,7 @@ async function revalidateCase(actor) {
         carbon.annual.calculationReceipt.inputHash,
     });
     workflowStore.setTrustServices(result);
+    const timestampProof = await timestampGateResultIfEnabled(caseId, result.gate);
     const evaluated = applyReadiness(caseId);
     audit(
       actor,
@@ -859,7 +896,8 @@ async function revalidateCase(actor) {
       caseId,
       evaluated.readiness.status === 'BLOCKED' ? 'DENY' : 'ALLOW',
       evaluated.readiness.reasonCodes[0] || null,
-      caseId
+      caseId,
+      { timestampProof }
     );
     return ok(200, {
       case: maskCase(evaluated.caseRecord, actor, true),

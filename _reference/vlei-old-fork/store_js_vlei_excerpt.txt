@@ -1,0 +1,38 @@
+4-const { session, suppliers, pcfPayloads } = require('./fixtures/bundle');
+5-const supabaseSync = require('./supabaseSync');
+6:const { verifySupplierCredentialChain } = require('./vleiCheck');
+7-const { scoreStagedPayload } = require('./confidenceScore');
+8-
+9-function deepClone(obj) {
+10-  return JSON.parse(JSON.stringify(obj));
+11-}
+12-
+13-function argsDigest(input) {
+14-  const raw = JSON.stringify(input == null ? {} : input);
+15-  return crypto.createHash('sha256').update(raw).digest('hex').slice(0, 16);
+16-}
+17-
+18-function createInitialState() {
+19-  const sessionData = session;
+20-  const suppliersData = suppliers;
+21-  const pcfData = pcfPayloads;
+--
+60-      credentials: s.credentials,
+61-      shareRevoked: state.revokedShares.has(s.supplierId),
+62:      vlei: s.vlei ? deepClone(s.vlei) : null,
+63:      vleiChainStatus: chain.chainStatus,
+64-    };
+65-  });
+66-}
+67-
+68-function supplierHasValidCredential(supplier) {
+69-  if (!supplier || !Array.isArray(supplier.credentials) || supplier.credentials.length === 0) {
+70-    return false;
+71-  }
+72-  const nowMs = Date.now();
+73-  return supplier.credentials.some(
+74-    (c) => c.signatureValid === true && c.expiresAt && new Date(c.expiresAt).getTime() > nowMs
+75-  );
+76-}
+77-
+78-function getPcfPayload(supplierId) {

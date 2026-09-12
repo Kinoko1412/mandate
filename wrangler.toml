@@ -39,6 +39,12 @@ fallthrough = true
 #     googleAuthorize/handleGoogleOAuthCallback)。OAuth redirect URI 註冊在 Google
 #     Cloud Console 要跟部署網域完全一致：https://<subdomain>.workers.dev/api/oauth/google/callback
 
+[vars]
+# 見 worker/index.js applyWorkerEnv()、server/workflowApi.js timestampGateResultIfEnabled()。
+# 不是密鑰,用 [vars] 沒有跟上面 secrets 衝突的疑慮——這個開關控制 revalidateCase() 在
+# Gate 判 GATE_OK 時是否真的對外打 RFC 3161 TSA 網路請求(見 docs/trust/RFC3161_TIMESTAMP_PLAN.md）。
+ENABLE_RFC3161_TIMESTAMP = "true"
+
 [observability]
 enabled = true
 

@@ -12,3 +12,4 @@ _backups/
 *.ptau
 .claude/settings.local.json
 .serena/
+openrouter.txt
