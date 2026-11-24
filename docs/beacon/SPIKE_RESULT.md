@@ -3,10 +3,19 @@
 > 任務：`docs/beacon/SPIKE_KYA_DAY1.md`｜分支 `beacon/kya-spike`｜執行機器：32GB
 > 狀態（2026-11-24）：**還沒有測試幣，鏈上 e2e 還沒跑**。以下分成「已實測」「已查原始碼」「還沒驗證」三類。
 
-## 結論（暫定，等 e2e 跑完再更新）
-- **路線 2（authz）**：訊息層面已經確認可行。帶 `allow_list` 的 `MsgGrant(SendAuthorization)` 和 `MsgGrantAllowance` 在測試網 simulate 都通過。缺點是「背後是 ME ID」**不是鏈上強制**，只能由賣方或查詢端自己查。
-- **路線 1（CosmWasm）**：合約寫好了，ME ID 是**鏈上強制**（Stargate 查 DID）。CI 的單元測試和 cw-multi-test 6/6 通過；optimizer 產物通過 `cosmwasm-check`（以 wasmvm 1.4 的 capabilities 檢查）。**還沒上鏈**（等測試幣）。
-- 暫時建議：**路線 1 為主、路線 2 為備援**。理由：題目要的是「背後是 ME ID 由鏈上檢查」，只有路線 1 做得到。路線 1 也只有一筆 `MsgExecuteContract`，可以拿到 40% 手續費分潤；路線 2 用 `MsgExec` 包起來就拿不到。這個建議要等實測確認 Stargate 查詢在鏈上真的能用。
+## 結論（2026-11-24 測試網實測後更新）
+- **路線 2（authz）：在測試網跑通。** 授權（MsgGrant + allow_list，加上 feegrant）→ 額度內付款 0.05 MEC 成功（賣方實收 5000000 umec）→ 超額被擋（`requested amount is more than spend limit`）→ 付給非白名單地址被擋（`cannot send to … address: unauthorized`）→ 撤銷後被擋（`authorization not found`）。每一步都有 tx hash，見下面的實測紀錄。缺點是「背後是 ME ID」**不是鏈上強制**。
+- **路線 1（CosmWasm）：已上鏈，鏈上 ME ID 檢查已證實可用。** code_id 37，合約 `me1pkm9d3556jcnvnfgxmfa0mzrf0t59c43fx53mz32yvmpfvyq2s8qx0dce3`（wasm sha256 `42a7d5a7…74db`，CI run 45353629950，commit 3342f0a）。店主還沒有 ME ID 時，代理付款被合約擋下，錯誤是 `owner has no ME ID on chain: codespace: did, code: 111`。這表示**合約透過 Stargate 查 `/metaearth.did.Query/Did` 在鏈上真的能用**；DID 查不到時，合約收到的是 ContractResult::Err。
+- **待 DID**：店主的 Testnet ME ID 下來之後，跑 `node cli.js e2e-cw --contract me1pkm9…dce3`，補完正向流程：額度內成功 → 超過單筆上限被擋 → 超過每期額度被擋 → 非白名單被擋 → 撤銷後被擋。也要確認 ACTIVE 時 Stargate 的 JSON 和 REST 一樣。
+- **建議：路線 1 為主。** 只有路線 1 能做到「背後是 ME ID 由鏈上強制檢查」，交易也只有一筆 MsgExecuteContract，可以拿 40% 手續費分潤。路線 2 當備援，或拿來對照說明「為什麼需要合約」。
+
+### 踩到的坑（已修）
+1. **測試網每筆最低手續費 10000 umec**，不是按 gas price 算（錯誤：`fee must greater than or equal 10000umec`）。`lib.js` 已改成取 max(10000, gas × 0.02)。
+2. **ME 測試網的 Gatekeeper 拒絕 wasm 浮點指令**（`Float operator detected: F32Load`），但 **cosmwasm-check 1.5.8 判 pass，沒抓到**。來源是 serde 的 untagged enum 和 deserialize_any。DID 欄位已改成只用字串解析，CI 也加了 `wasm-objdump` 浮點指令掃描。
+3. 第一次 authz 實測因為手續費不足，所有交易都在 CheckTx 被拒，預期失敗的步驟被誤判為 PASS。已刪掉那批紀錄，並改成預期失敗的步驟必須核對失敗原因。
+
+### 測試幣用量
+店主：store code 0.00602 MEC，加上預存 0.5 MEC（還在合約裡，可以 withdraw），加上路線 2 付出的 0.05 MEC，以及數筆 0.0001 MEC 的手續費。
 
 ## 已實測（測試網唯讀，2026-11-24）
 | 項目 | 結果 |
@@ -80,3 +89,13 @@ node cli.js e2e-cw ../../contracts/kya-cw/artifacts/kya_cw.wasm
 | 路線 | 步驟 | 預期 | 結果 | code | tx hash | 鏈上訊息 |
 |---|---|---|---|---|---|---|
 | 路線1 CosmWasm | MsgStoreCode（wasm sha256 78159810e83a…） | success | ❌ | -1 | `(simulate)` | failed to execute message; message index: 0: Error calling the VM: Error compiling Wasm: Could not compile: WebAssembly translation error: Error in middleware Gatekeeper: Float operator detected: F32L |
+
+### 路線 1 CosmWasm 實測（店主尚無 ME ID）（2026-11-24T08:14:01.025Z，chain-id mechain_400-1）
+
+| 路線 | 步驟 | 預期 | 結果 | code | tx hash | 鏈上訊息 |
+|---|---|---|---|---|---|---|
+| 路線1 CosmWasm | MsgStoreCode（wasm sha256 42a7d5a799c8…） | success | ✅ | 0 | `217D4C68FCFFB885D4A34EE4C83AD8AB5A6A8EE11F7E4CC5E847FEF1AC6E241F` | [{"msg_index":0,"events":[{"type":"message","attributes":[{"key":"action","value":"/cosmwasm.wasm.v1.MsgStoreCode"},{"key":"sender","value":"me1hxf7vagxkklc59wgs4h7nudc5ts0nrnrglaw7c"},{"key":"module" |
+| 路線1 CosmWasm | MsgInstantiateContract(code 37，預存 0.5 MEC) | success | ✅ | 0 | `3A2E1313BA31A523C49EBDF8351C21EA3F64172BD9537123BD92DCF3B08DF7DA` | [{"msg_index":0,"events":[{"type":"message","attributes":[{"key":"action","value":"/cosmwasm.wasm.v1.MsgInstantiateContract"},{"key":"sender","value":"me1hxf7vagxkklc59wgs4h7nudc5ts0nrnrglaw7c"},{"key |
+| 路線1 CosmWasm | 授權：grant（單筆 0.1、每日 0.15 MEC、7 天、allowed=[seller]） | success | ✅ | 0 | `A0CE491AA74A3B8CC45B106B5D2BACAF3DE3BD0C9641E26BF4BE80228AECC841` | [{"msg_index":0,"events":[{"type":"message","attributes":[{"key":"action","value":"/cosmwasm.wasm.v1.MsgExecuteContract"},{"key":"sender","value":"me1hxf7vagxkklc59wgs4h7nudc5ts0nrnrglaw7c"},{"key":"m |
+| 路線1 CosmWasm | query agent_status：owner_me_id.found=false，can_spend_now=false | - | ✅ | - | `-` | codespace: did, code: 111 |
+| 路線1 CosmWasm | 店主沒有 ME ID → 額度內付款 0.05 MEC 應被擋（鏈上 Stargate 查 DID） | fail | ✅ | 5 | `45FF1EC7B4DB6F454F9B808283F184193116205D504DCEA4CBC47D6E76FE13D3` | failed to execute message; message index: 0: owner has no ME ID on chain: codespace: did, code: 111: execute wasm contract failed |
