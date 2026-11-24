@@ -51,17 +51,6 @@ jobs:
           sudo chown -R "$(id -u)" artifacts
           sha256sum artifacts/kya_cw.wasm | tee artifacts/kya_cw.wasm.sha256
           ls -l artifacts
-      - uses: dtolnay/rust-toolchain@stable
-      - name: cosmwasm-check（模擬 wasmvm 1.4 的 capabilities）
-        run: |
-          cargo install cosmwasm-check --version 1.5.8 --locked
-          cosmwasm-check --available-capabilities iterator,staking,stargate,cosmwasm_1_1,cosmwasm_1_2,cosmwasm_1_3,cosmwasm_1_4 contracts/kya-cw/artifacts/kya_cw.wasm
-      - name: Summary
-        run: |
-          echo "### kya_cw.wasm" >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
-          cat contracts/kya-cw/artifacts/kya_cw.wasm.sha256 >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         with:
           name: kya-cw-wasm
@@ -70,3 +59,15 @@ jobs:
             contracts/kya-cw/artifacts/kya_cw.wasm.sha256
             contracts/kya-cw/artifacts/checksums.txt
             contracts/kya-cw/Cargo.lock
+      # cosmwasm-check 1.5 依賴舊版 wasmer/corosensei，用最新 Rust 連結會缺 __rust_probestack，所以固定 1.80
+      - uses: dtolnay/rust-toolchain@1.80
+      - name: cosmwasm-check（模擬 wasmvm 1.4 的 capabilities）
+        run: |
+          cargo +1.80 install cosmwasm-check --version 1.5.8 --locked
+          cosmwasm-check --available-capabilities iterator,staking,stargate,cosmwasm_1_1,cosmwasm_1_2,cosmwasm_1_3,cosmwasm_1_4 contracts/kya-cw/artifacts/kya_cw.wasm
+      - name: Summary
+        run: |
+          echo "### kya_cw.wasm" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          cat contracts/kya-cw/artifacts/kya_cw.wasm.sha256 >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
