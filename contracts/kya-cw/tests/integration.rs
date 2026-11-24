@@ -106,8 +106,8 @@ fn setup(min_kyc_level: u8, owner_did: Option<(&'static str, &'static str)>) -> 
     Env { app, dids, contract, owner, agent, seller, stranger }
 }
 
-fn grant(e: &mut Env, allowed: Option<Vec<String>>) -> AnyResult<AppResponse> {
-    let expires_at = e.app.block_info().time.seconds() + 3600;
+fn grant(e: &mut Env, allowed: Option<Vec<String>>, ttl: u64) -> AnyResult<AppResponse> {
+    let expires_at = e.app.block_info().time.seconds() + ttl;
     e.app.execute_contract(
         e.owner.clone(),
         e.contract.clone(),
@@ -139,7 +139,7 @@ fn bal(e: &Env, a: &Addr) -> u128 {
 fn full_flow_grant_spend_overlimit_revoke() {
     let mut e = setup(1, Some(("DID_STATUS_ACTIVE", "KYC_LEVEL_TWO")));
     let allowed = vec![e.seller.to_string()];
-    grant(&mut e, Some(allowed)).unwrap();
+    grant(&mut e, Some(allowed), 7 * 86_400).unwrap();
 
     // 額度內付款
     let seller = e.seller.clone();
@@ -174,7 +174,7 @@ fn full_flow_grant_spend_overlimit_revoke() {
 #[test]
 fn owner_without_me_id_is_blocked_on_chain() {
     let mut e = setup(1, None);
-    grant(&mut e, None).unwrap();
+    grant(&mut e, None, 3600).unwrap();
     let seller = e.seller.clone();
     assert!(matches!(err_of(spend(&mut e, &seller, 1)), ContractError::OwnerNoMeId { .. }));
     let s: AgentStatusResponse = e.app.wrap().query_wasm_smart(&e.contract, &QueryMsg::AgentStatus { agent: e.agent.to_string() }).unwrap();
@@ -184,7 +184,7 @@ fn owner_without_me_id_is_blocked_on_chain() {
 #[test]
 fn inactive_or_low_kyc_owner_is_blocked() {
     let mut e = setup(2, Some(("DID_STATUS_ACTIVE", "KYC_LEVEL_ONE")));
-    grant(&mut e, None).unwrap();
+    grant(&mut e, None, 3600).unwrap();
     let seller = e.seller.clone();
     assert!(matches!(err_of(spend(&mut e, &seller, 1)), ContractError::OwnerNotEligible { kyc_level: 1, min: 2, .. }));
 
@@ -199,7 +199,7 @@ fn inactive_or_low_kyc_owner_is_blocked() {
 #[test]
 fn expiry_and_owner_only() {
     let mut e = setup(0, Some(("DID_STATUS_ACTIVE", "KYC_LEVEL_NONE")));
-    grant(&mut e, None).unwrap();
+    grant(&mut e, None, 3600).unwrap();
     // 代理不能自己授權、撤銷、提款
     let agent = e.agent.clone();
     let c = e.contract.clone();
