@@ -1,0 +1,72 @@
+# BEACON KYA spike：路線 1 合約的單元測試和正式 wasm 建置。
+# 部署到 ME 測試網的 wasm 一律用這個 workflow 的 optimizer 產物（artifact），不要用本機未最佳化的檔案。
+name: kya-cw
+
+on:
+  push:
+    branches: [beacon/kya-spike]
+    paths: ['contracts/kya-cw/**', '.github/workflows/kya-cw.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: contracts/kya-cw
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Lockfile（依 rust-version 挑相容 optimizer 的依賴版本）
+        run: |
+          if [ ! -f Cargo.lock ]; then
+            CARGO_RESOLVER_INCOMPATIBLE_RUST_VERSIONS=fallback cargo generate-lockfile
+          fi
+      - name: Unit + cw-multi-test
+        run: cargo test --locked -- --nocapture
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kya-cw-cargo-lock
+          path: contracts/kya-cw/Cargo.lock
+
+  optimize:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: kya-cw-cargo-lock
+          path: contracts/kya-cw
+      - name: cosmwasm/optimizer（cosmwasm-std 1.x 相容版本）
+        working-directory: contracts/kya-cw
+        run: |
+          docker run --rm -v "$PWD":/code \
+            --mount type=volume,source=kya_cw_cache,target=/target \
+            --mount type=volume,source=registry_cache,target=/usr/local/cargo/registry \
+            cosmwasm/optimizer:0.15.1
+          sudo chown -R "$(id -u)" artifacts
+          sha256sum artifacts/kya_cw.wasm | tee artifacts/kya_cw.wasm.sha256
+          ls -l artifacts
+      - uses: dtolnay/rust-toolchain@stable
+      - name: cosmwasm-check（模擬 wasmvm 1.4 的 capabilities）
+        run: |
+          cargo install cosmwasm-check --version 1.5.8 --locked
+          cosmwasm-check --available-capabilities iterator,staking,stargate,cosmwasm_1_1,cosmwasm_1_2,cosmwasm_1_3,cosmwasm_1_4 contracts/kya-cw/artifacts/kya_cw.wasm
+      - name: Summary
+        run: |
+          echo "### kya_cw.wasm" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          cat contracts/kya-cw/artifacts/kya_cw.wasm.sha256 >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kya-cw-wasm
+          path: |
+            contracts/kya-cw/artifacts/kya_cw.wasm
+            contracts/kya-cw/artifacts/kya_cw.wasm.sha256
+            contracts/kya-cw/artifacts/checksums.txt
+            contracts/kya-cw/Cargo.lock
