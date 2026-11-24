@@ -138,7 +138,8 @@ fn bal(e: &Env, a: &Addr) -> u128 {
 #[test]
 fn full_flow_grant_spend_overlimit_revoke() {
     let mut e = setup(1, Some(("DID_STATUS_ACTIVE", "KYC_LEVEL_TWO")));
-    grant(&mut e, Some(vec![e.seller.to_string()])).unwrap();
+    let allowed = vec![e.seller.to_string()];
+    grant(&mut e, Some(allowed)).unwrap();
 
     // 額度內付款
     let seller = e.seller.clone();
