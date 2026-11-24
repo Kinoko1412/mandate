@@ -183,7 +183,7 @@ pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
                     AgentStatusResponse {
                         agent: agent.to_string(), owner: cfg.owner.to_string(), has_mandate: true, revoked: m.revoked, expired,
                         per_tx_limit: m.per_tx_limit, period_limit: m.period_limit, remaining_in_period: m.remaining(), expires_at: m.expires_at,
-                        allowed_recipients: m.allowed_recipients.map(|l| l.into_iter().map(|a| a.to_string()).collect()),
+                        allowed_recipients: m.allowed_recipients.as_ref().map(|l| l.iter().map(|a| a.to_string()).collect()),
                         total_spent: m.total_spent, owner_me_id,
                         can_spend_now: eligible && !m.revoked && !expired && !m.remaining().is_zero() && !balance.amount.is_zero(),
                         contract_balance: balance,
