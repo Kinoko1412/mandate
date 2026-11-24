@@ -1,0 +1,17 @@
+{
+  "name": "me-tx",
+  "private": true,
+  "type": "commonjs",
+  "description": "BEACON KYA spike: ME testnet key generation and tx tooling",
+  "scripts": {
+    "keygen": "node keygen.js"
+  },
+  "dependencies": {
+    "@cosmjs/amino": "^0.32.4",
+    "@cosmjs/crypto": "0.32.4",
+    "@cosmjs/encoding": "0.32.4",
+    "@cosmjs/math": "^0.32.4",
+    "@cosmjs/proto-signing": "0.32.4",
+    "cosmjs-types": "^0.9.0"
+  }
+}

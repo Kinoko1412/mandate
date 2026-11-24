@@ -1,0 +1,38 @@
+[package]
+name = "kya-cw"
+version = "0.1.0"
+edition = "2021"
+# ME 測試網：wasmd v0.43.0 / wasmvm v1.4.1，只能用 cosmwasm-std 1.x。
+# optimizer 用 cosmwasm/optimizer:0.15.1（Rust 1.75），所以依賴版本要相容 1.75。
+rust-version = "1.73"
+description = "BEACON KYA spike: agent spending mandate gated by the owner's on-chain ME ID"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+library = []
+
+[profile.release]
+opt-level = 3
+debug = false
+rpath = false
+lto = true
+debug-assertions = false
+codegen-units = 1
+panic = "abort"
+incremental = false
+overflow-checks = true
+
+[dependencies]
+# 不開 cosmwasm_1_5 以上的 capability，wasmvm 1.4 不認得
+cosmwasm-std = { version = "1.5", features = ["stargate"] }
+cosmwasm-schema = "1.5"
+cw-storage-plus = "1.2"
+serde = { version = "1.0", features = ["derive"] }
+thiserror = "1.0"
+
+[dev-dependencies]
+cw-multi-test = "0.20.1"
+anyhow = "1"
+schemars = "0.8"
