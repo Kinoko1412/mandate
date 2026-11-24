@@ -11,16 +11,24 @@ use serde::Deserialize;
 
 pub const DID_QUERY_PATH: &str = "/metaearth.did.Query/Did";
 
-#[derive(Deserialize, Debug, Clone, PartialEq)]
+/// 欄位全部宣告成字串：ConvertProtoToJSONMarshal 輸出的 enum 是字串（EnumsAsInts=false）。
+/// 不用 deserialize_any／untagged：那條路徑會把浮點指令帶進 wasm，ME 測試網的 Gatekeeper 會拒絕。
+#[derive(Deserialize, Debug, Clone, PartialEq, Default)]
 pub struct DidInfo {
     #[serde(default)]
     pub did: String,
     #[serde(default)]
     pub address: String,
     #[serde(default)]
-    pub status: serde_json_wasm_value::EnumOrInt,
+    pub pubkey: String,
+    #[serde(default)]
+    pub status: String,
+    #[serde(default, rename = "regionId")]
+    pub region_id: String,
     #[serde(default, rename = "kycLevel")]
-    pub kyc_level: serde_json_wasm_value::EnumOrInt,
+    pub kyc_level: String,
+    #[serde(default)]
+    pub sub_account: String,
 }
 
 #[derive(Deserialize, Debug)]
@@ -49,23 +57,15 @@ pub fn encode_query_did(address: &str) -> Binary {
     Binary::from(out)
 }
 
-pub fn status_is_active(s: &serde_json_wasm_value::EnumOrInt) -> bool {
-    match s {
-        serde_json_wasm_value::EnumOrInt::Str(v) => v == "DID_STATUS_ACTIVE",
-        serde_json_wasm_value::EnumOrInt::Int(n) => *n == 1,
-        serde_json_wasm_value::EnumOrInt::Missing => false,
-    }
+pub fn status_is_active(s: &str) -> bool {
+    s == "DID_STATUS_ACTIVE"
 }
 
-pub fn kyc_level_num(k: &serde_json_wasm_value::EnumOrInt) -> u8 {
+pub fn kyc_level_num(k: &str) -> u8 {
     match k {
-        serde_json_wasm_value::EnumOrInt::Str(v) => match v.as_str() {
-            "KYC_LEVEL_ONE" => 1,
-            "KYC_LEVEL_TWO" => 2,
-            _ => 0,
-        },
-        serde_json_wasm_value::EnumOrInt::Int(n) => (*n).min(255) as u8,
-        serde_json_wasm_value::EnumOrInt::Missing => 0,
+        "KYC_LEVEL_ONE" => 1,
+        "KYC_LEVEL_TWO" => 2,
+        _ => 0,
     }
 }
 
@@ -83,58 +83,6 @@ pub fn query_did(querier: &QuerierWrapper<Empty>, address: &str) -> StdResult<(O
             match resp.info {
                 Some(info) if !info.did.is_empty() => Ok((Some(info), None)),
                 _ => Ok((None, Some("empty did info".to_string()))),
-            }
-        }
-    }
-}
-
-/// enum 欄位可能是字串（JSON 正常情況）或數字，兩種都收
-pub mod serde_json_wasm_value {
-    use serde::{Deserialize, Deserializer};
-
-    #[derive(Debug, Clone, PartialEq, Default)]
-    pub enum EnumOrInt {
-        Str(String),
-        Int(u64),
-        #[default]
-        Missing,
-    }
-
-    // 不能用 #[serde(untagged)]：serde 的 untagged 會經過內部 Content 型別（含 f32/f64），
-    // 編出來的 wasm 帶浮點指令，ME 測試網的 Gatekeeper 會拒絕（實測：Float operator detected: F32Load）。
-    // 改成只實作 visit_str / visit_u64 / visit_i64 的 Visitor。
-    struct V;
-    impl<'de> serde::de::Visitor<'de> for V {
-        type Value = EnumOrInt;
-        fn expecting(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
-            f.write_str("enum name string or integer")
-        }
-        fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<EnumOrInt, E> {
-            Ok(EnumOrInt::Str(v.to_string()))
-        }
-        fn visit_string<E: serde::de::Error>(self, v: String) -> Result<EnumOrInt, E> {
-            Ok(EnumOrInt::Str(v))
-        }
-        fn visit_u64<E: serde::de::Error>(self, v: u64) -> Result<EnumOrInt, E> {
-            Ok(EnumOrInt::Int(v))
-        }
-        fn visit_i64<E: serde::de::Error>(self, v: i64) -> Result<EnumOrInt, E> {
-            Ok(EnumOrInt::Int(v.max(0) as u64))
-        }
-    }
-
-    impl<'de> Deserialize<'de> for EnumOrInt {
-        fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-            d.deserialize_any(V)
-        }
-    }
-
-    impl EnumOrInt {
-        pub fn as_string(&self) -> String {
-            match self {
-                EnumOrInt::Str(s) => s.clone(),
-                EnumOrInt::Int(i) => i.to_string(),
-                EnumOrInt::Missing => String::new(),
             }
         }
     }
@@ -158,14 +106,6 @@ mod tests {
         let json = br#"{"info":{"did":"2605105872869","address":"me1qzxz57yv6sekvkaahgh6tj6cwqc4ntc6xakplw","pubkey":"{\"@type\": \"/cosmos.crypto.secp256k1.PubKey\",\"key\": \"\"}","status":"DID_STATUS_ACTIVE","regionId":"me_earth","kycLevel":"KYC_LEVEL_TWO","sub_account":""}}"#;
         let r: QueryDidResponse = cosmwasm_std::from_json(json).unwrap();
         let info = r.info.unwrap();
-        assert!(status_is_active(&info.status));
-        assert_eq!(kyc_level_num(&info.kyc_level), 2);
-    }
-
-    #[test]
-    fn parses_numeric_enums_too() {
-        let json = br#"{"info":{"did":"1","address":"me1x","status":1,"kycLevel":2}}"#;
-        let info = cosmwasm_std::from_json::<QueryDidResponse>(json).unwrap().info.unwrap();
         assert!(status_is_active(&info.status));
         assert_eq!(kyc_level_num(&info.kyc_level), 2);
     }

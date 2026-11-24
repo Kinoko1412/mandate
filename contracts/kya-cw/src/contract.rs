@@ -102,7 +102,7 @@ fn check_owner_me_id(deps: Deps, cfg: &Config) -> Result<(), ContractError> {
     let info = info.ok_or(ContractError::OwnerNoMeId { reason: err.unwrap_or_default() })?;
     let lvl = kyc_level_num(&info.kyc_level);
     if !status_is_active(&info.status) || lvl < cfg.min_kyc_level {
-        return Err(ContractError::OwnerNotEligible { status: info.status.as_string(), kyc_level: lvl, min: cfg.min_kyc_level });
+        return Err(ContractError::OwnerNotEligible { status: info.status.clone(), kyc_level: lvl, min: cfg.min_kyc_level });
     }
     Ok(())
 }
@@ -167,7 +167,7 @@ pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
             let now = env.block.time.seconds();
             let (did, err) = query_did(&deps.querier, cfg.owner.as_str())?;
             let owner_me_id = match &did {
-                Some(i) => MeIdView { found: true, did: Some(i.did.clone()), status: Some(i.status.as_string()), kyc_level: Some(kyc_level_num(&i.kyc_level)), error: None },
+                Some(i) => MeIdView { found: true, did: Some(i.did.clone()), status: Some(i.status.clone()), kyc_level: Some(kyc_level_num(&i.kyc_level)), error: None },
                 None => MeIdView { found: false, did: None, status: None, kyc_level: None, error: err },
             };
             let eligible = did.as_ref().map(|i| status_is_active(&i.status) && kyc_level_num(&i.kyc_level) >= cfg.min_kyc_level).unwrap_or(false);
