@@ -7,6 +7,7 @@
 - **路線 2（authz）：在測試網跑通。** 授權（MsgGrant + allow_list，加上 feegrant）→ 額度內付款 0.05 MEC 成功（賣方實收 5000000 umec）→ 超額被擋（`requested amount is more than spend limit`）→ 付給非白名單地址被擋（`cannot send to … address: unauthorized`）→ 撤銷後被擋（`authorization not found`）。每一步都有 tx hash，見下面的實測紀錄。缺點是「背後是 ME ID」**不是鏈上強制**。
 - **路線 1（CosmWasm）：已上鏈，鏈上 ME ID 檢查已證實可用。** code_id 37，合約 `me1pkm9d3556jcnvnfgxmfa0mzrf0t59c43fx53mz32yvmpfvyq2s8qx0dce3`（wasm sha256 `42a7d5a7…74db`，CI run 45353629950，commit 3342f0a）。店主還沒有 ME ID 時，代理付款被合約擋下，錯誤是 `owner has no ME ID on chain: codespace: did, code: 111`。這表示**合約透過 Stargate 查 `/metaearth.did.Query/Did` 在鏈上真的能用**；DID 查不到時，合約收到的是 ContractResult::Err。
 - **待 DID**：店主的 Testnet ME ID 下來之後，跑 `node cli.js e2e-cw --contract me1pkm9…dce3`，補完正向流程：額度內成功 → 超過單筆上限被擋 → 超過每期額度被擋 → 非白名單被擋 → 撤銷後被擋。也要確認 ACTIVE 時 Stargate 的 JSON 和 REST 一樣。
+- **等店主 DID（2026-11-24）**：使用者 16:27 替店主地址申請 Testnet ME ID（Advanced Verification），頁面顯示 Application Successful。32GB 從 16:28 起每 2.5 分鐘查 `/metaearth/did/did?address=me1hxf7…law7c`，到 17:58 共查 36 次，都是 `codespace did code 111: DID not found`。查鏈上交易紀錄（`transfer.recipient`／`message.sender` = 店主），只有我們自己發出的 13 筆，沒有任何 DID 或 KYC 相關交易。推測申請還在鏈下審核，沒有上鏈（**未驗證**，看不到審核狀態）。上一次選 Real-Person 也一直停在 Unverified。正向流程還沒跑。
 - **建議：路線 1 為主。** 只有路線 1 能做到「背後是 ME ID 由鏈上強制檢查」，交易也只有一筆 MsgExecuteContract，可以拿 40% 手續費分潤。路線 2 當備援，或拿來對照說明「為什麼需要合約」。
 
 ### 踩到的坑（已修）
