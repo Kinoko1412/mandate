@@ -122,7 +122,11 @@ async function signAndBroadcast(signer, msgs, { memo = '', feeGranter, gasLimit 
     if (!sim.ok) return { simulated: true, code: -1, rawLog: sim.error };
     gasLimit = Math.ceil(sim.gasUsed * CFG.gasAdjust);
   }
-  const feeAmount = Math.ceil(gasLimit * CFG.gasPrice);
+  // 測試網 ante 規定每筆手續費至少 10000 umec（實測錯誤：fee must greater than or equal 10000umec）
+  const feeAmount = Math.max(Number(process.env.ME_MIN_FEE_UMEC || '10000'), Math.ceil(gasLimit * CFG.gasPrice));
+  const maxFee = Number(process.env.ME_MAX_FEE_UMEC || '20000000'); // 預設上限 0.2 MEC，避免一筆把測試幣燒光
+  console.log(`  [fee] ${msgs.map((m) => m.typeUrl.split('.').pop()).join('+')} gasLimit=${gasLimit} fee=${feeAmount} umec (${feeAmount / 1e8} MEC)`);
+  if (feeAmount > maxFee) throw new Error(`fee ${feeAmount} umec exceeds ME_MAX_FEE_UMEC=${maxFee}; aborting before broadcast`);
   const { bodyBytes, authInfoBytes, signDoc } = buildTxBytes({ msgs, memo, pubkey: signer.pubkey, sequence: acc.sequence, gasLimit, feeAmount, feeGranter, accountNumber: acc.accountNumber, chainId: CFG.chainId });
   const { signature } = await signer.wallet.signDirect(signer.address, signDoc);
   const txBytes = TxRaw.encode(TxRaw.fromPartial({ bodyBytes, authInfoBytes, signatures: [fromBase64(signature.signature)] })).finish();

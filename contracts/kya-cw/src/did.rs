@@ -100,18 +100,32 @@ pub mod serde_json_wasm_value {
         Missing,
     }
 
+    // 不能用 #[serde(untagged)]：serde 的 untagged 會經過內部 Content 型別（含 f32/f64），
+    // 編出來的 wasm 帶浮點指令，ME 測試網的 Gatekeeper 會拒絕（實測：Float operator detected: F32Load）。
+    // 改成只實作 visit_str / visit_u64 / visit_i64 的 Visitor。
+    struct V;
+    impl<'de> serde::de::Visitor<'de> for V {
+        type Value = EnumOrInt;
+        fn expecting(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+            f.write_str("enum name string or integer")
+        }
+        fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<EnumOrInt, E> {
+            Ok(EnumOrInt::Str(v.to_string()))
+        }
+        fn visit_string<E: serde::de::Error>(self, v: String) -> Result<EnumOrInt, E> {
+            Ok(EnumOrInt::Str(v))
+        }
+        fn visit_u64<E: serde::de::Error>(self, v: u64) -> Result<EnumOrInt, E> {
+            Ok(EnumOrInt::Int(v))
+        }
+        fn visit_i64<E: serde::de::Error>(self, v: i64) -> Result<EnumOrInt, E> {
+            Ok(EnumOrInt::Int(v.max(0) as u64))
+        }
+    }
+
     impl<'de> Deserialize<'de> for EnumOrInt {
         fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-            #[derive(Deserialize)]
-            #[serde(untagged)]
-            enum Raw {
-                S(String),
-                I(u64),
-            }
-            Ok(match Raw::deserialize(d)? {
-                Raw::S(s) => EnumOrInt::Str(s),
-                Raw::I(i) => EnumOrInt::Int(i),
-            })
+            d.deserialize_any(V)
         }
     }
 
@@ -144,6 +158,14 @@ mod tests {
         let json = br#"{"info":{"did":"2605105872869","address":"me1qzxz57yv6sekvkaahgh6tj6cwqc4ntc6xakplw","pubkey":"{\"@type\": \"/cosmos.crypto.secp256k1.PubKey\",\"key\": \"\"}","status":"DID_STATUS_ACTIVE","regionId":"me_earth","kycLevel":"KYC_LEVEL_TWO","sub_account":""}}"#;
         let r: QueryDidResponse = cosmwasm_std::from_json(json).unwrap();
         let info = r.info.unwrap();
+        assert!(status_is_active(&info.status));
+        assert_eq!(kyc_level_num(&info.kyc_level), 2);
+    }
+
+    #[test]
+    fn parses_numeric_enums_too() {
+        let json = br#"{"info":{"did":"1","address":"me1x","status":1,"kycLevel":2}}"#;
+        let info = cosmwasm_std::from_json::<QueryDidResponse>(json).unwrap().info.unwrap();
         assert!(status_is_active(&info.status));
         assert_eq!(kyc_level_num(&info.kyc_level), 2);
     }

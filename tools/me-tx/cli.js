@@ -4,7 +4,7 @@
 //   node cli.js did <me1...>                查 ME ID
 //   node cli.js probe-sim [granter]         唯讀 simulate 路線 2 的 MsgGrant／MsgGrantAllowance（不廣播）
 //   node cli.js e2e-authz                   路線 2 實測（需要測試幣）
-//   node cli.js e2e-cw <path/to/kya_cw.wasm> [--code-id N]   路線 1 實測（需要測試幣，wasm 用 CI optimizer 產物）
+//   node cli.js e2e-cw <wasm> [--phase nodid] [--code-id N] [--contract me1...]   路線 1 實測（wasm 用 CI optimizer 產物）
 //   node cli.js e2e <wasm>                  兩條路線都跑
 // 每筆交易的結果會附加到 docs/beacon/SPIKE_RESULT.md 的「實測紀錄」。
 const fs = require('fs');
@@ -15,11 +15,19 @@ const L = require('./lib');
 const RESULT_MD = path.resolve(__dirname, '..', '..', 'docs', 'beacon', 'SPIKE_RESULT.md');
 const MEC = 100_000_000n;
 const log = [];
+const FAIL_GAS = { gasLimit: 400000 }; // 預期失敗的交易用固定 gas 廣播（約 0.00008 MEC），讓鏈上留下失敗紀錄和 hash
+// expect：'success'，或 'fail:<正則>'（失敗原因必須符合，避免把手續費不足之類的錯誤當成「被規則擋下」）
 function record(route, step, expect, r) {
-  const ok = expect === 'success' ? r.code === 0 : r.code !== 0 && r.code !== undefined;
-  const row = { route, step, expect, ok, hash: r.hash || '-', code: r.code, note: (r.rawLog || '').toString().slice(0, 160).replace(/\|/g, '/') };
+  let ok;
+  if (expect === 'success') ok = r.code === 0;
+  else {
+    const re = expect.startsWith('fail:') ? new RegExp(expect.slice(5), 'i') : null;
+    ok = r.code !== 0 && r.code !== undefined && (!re || re.test(r.rawLog || ''));
+  }
+  const row = { route, step, expect: expect.replace(/^fail:.*/, 'fail'), ok, hash: r.hash || '(simulate)', code: r.code, note: (r.rawLog || '').toString().slice(0, 200).replace(/\|/g, '/').replace(/[^ -~一-鿿：，（）]/g, '?') };
   log.push(row);
-  console.log(`${ok ? 'PASS' : 'FAIL'} [${route}] ${step} expect=${expect} code=${r.code} hash=${row.hash}\n      ${row.note}`);
+  console.log(`${ok ? 'PASS' : 'FAIL'} [${route}] ${step} expect=${expect} code=${r.code} hash=${row.hash}
+      ${row.note}`);
   return ok;
 }
 function flushLog(title) {
@@ -70,54 +78,72 @@ async function e2eAuthz() {
   record(R, '額度內付款 0.05 MEC（MsgExec，手續費由 feegrant 付）', 'success',
     await L.signAndBroadcast(agent, [L.M.exec(agent.address, [L.M.send(owner.address, seller, MEC / 20n)])], { feeGranter: owner.address }));
   console.log(`seller balance +${(await L.getBalance(seller)) - before} umec`);
-  record(R, '超額 0.08 MEC（剩餘額度 0.05）', 'fail',
-    await L.signAndBroadcast(agent, [L.M.exec(agent.address, [L.M.send(owner.address, seller, (MEC * 8n) / 100n)])], { feeGranter: owner.address }));
-  record(R, '付給不在 allow_list 的地址', 'fail',
-    await L.signAndBroadcast(agent, [L.M.exec(agent.address, [L.M.send(owner.address, stranger, 1000n)])], { feeGranter: owner.address }));
+  record(R, '超額 0.08 MEC（剩餘額度 0.05）', 'fail:insufficient funds|spend limit|exceed',
+    await L.signAndBroadcast(agent, [L.M.exec(agent.address, [L.M.send(owner.address, seller, (MEC * 8n) / 100n)])], { feeGranter: owner.address, ...FAIL_GAS }));
+  record(R, '付給不在 allow_list 的地址', 'fail:cannot send to|not allowed',
+    await L.signAndBroadcast(agent, [L.M.exec(agent.address, [L.M.send(owner.address, stranger, 1000n)])], { feeGranter: owner.address, ...FAIL_GAS }));
   record(R, '撤銷：MsgRevoke', 'success', await L.signAndBroadcast(owner, [L.M.revoke(owner.address, agent.address)]));
-  record(R, '撤銷後付款 0.01 MEC', 'fail',
-    await L.signAndBroadcast(agent, [L.M.exec(agent.address, [L.M.send(owner.address, seller, MEC / 100n)])], { feeGranter: owner.address }));
+  record(R, '撤銷後付款 0.01 MEC', 'fail:authorization not found|not found',
+    await L.signAndBroadcast(agent, [L.M.exec(agent.address, [L.M.send(owner.address, seller, MEC / 100n)])], { feeGranter: owner.address, ...FAIL_GAS }));
   record(R, '收尾：MsgRevokeAllowance', 'success', await L.signAndBroadcast(owner, [L.M.revokeAllowance(owner.address, agent.address)]));
 }
 
-async function e2eCw(wasmPath, codeIdArg) {
+async function e2eCw(wasmPath, opts = {}) {
+  // phase：'nodid' = 店主還沒有 ME ID，只驗證「沒有 ME ID 會被擋」；'full' = 完整正向流程（店主要有 ACTIVE ME ID）
+  const phase = opts.phase || 'full';
   const owner = await L.loadWallet('owner'); const agent = await L.loadWallet('agent'); const seller = L.addressOf('seller');
   const R = '路線1 CosmWasm';
-  let codeId = codeIdArg;
-  if (!codeId) {
+  let { codeId, contract } = opts;
+  if (!codeId && !contract) {
     const wasm = fs.readFileSync(wasmPath);
     console.log(`wasm ${wasmPath} sha256=${crypto.createHash('sha256').update(wasm).digest('hex')} size=${wasm.length}`);
     const r = await L.signAndBroadcast(owner, [L.M.storeCode(owner.address, wasm)]);
-    record(R, 'MsgStoreCode', 'success', r);
+    record(R, `MsgStoreCode（wasm sha256 ${crypto.createHash('sha256').update(wasm).digest('hex').slice(0, 12)}…）`, 'success', r);
     codeId = L.findEventAttr(r.events, 'store_code', 'code_id');
+    console.log(`code_id=${codeId}`);
     if (!codeId) return;
   }
-  const inst = await L.signAndBroadcast(owner, [L.M.instantiate(owner.address, codeId, { min_kyc_level: 1, denom: L.CFG.denom }, `kya-spike-${Date.now()}`, MEC / 2n, owner.address)]);
-  record(R, `MsgInstantiateContract(code ${codeId}，預存 0.5 MEC)`, 'success', inst);
-  const contract = L.findEventAttr(inst.events, 'instantiate', '_contract_address');
-  if (!contract) return;
+  if (!contract) {
+    const inst = await L.signAndBroadcast(owner, [L.M.instantiate(owner.address, codeId, { min_kyc_level: 1, denom: L.CFG.denom }, `kya-spike-${Date.now()}`, MEC / 2n, owner.address)]);
+    record(R, `MsgInstantiateContract(code ${codeId}，預存 0.5 MEC)`, 'success', inst);
+    contract = L.findEventAttr(inst.events, 'instantiate', '_contract_address');
+    if (!contract) return;
+  }
   console.log(`contract=${contract}`);
   const nowS = Math.floor(Date.now() / 1000);
-  record(R, '授權：grant（單筆 0.1、每日 0.15 MEC、allowed=[seller]）', 'success',
-    await L.signAndBroadcast(owner, [L.M.execute(owner.address, contract, { grant: { agent: agent.address, per_tx_limit: String(MEC / 10n), period_limit: String((MEC * 15n) / 100n), period_seconds: 86400, expires_at: nowS + 3600, allowed_recipients: [seller] } })]));
-  console.log('agent_status:', JSON.stringify(await L.smartQuery(contract, { agent_status: { agent: agent.address } })));
+  record(R, '授權：grant（單筆 0.1、每日 0.15 MEC、7 天、allowed=[seller]）', 'success',
+    await L.signAndBroadcast(owner, [L.M.execute(owner.address, contract, { grant: { agent: agent.address, per_tx_limit: String(MEC / 10n), period_limit: String((MEC * 15n) / 100n), period_seconds: 86400, expires_at: nowS + 7 * 86400, allowed_recipients: [seller] } })]));
+  const st = await L.smartQuery(contract, { agent_status: { agent: agent.address } });
+  console.log('agent_status:', JSON.stringify(st));
+  log.push({ route: R, step: `query agent_status：owner_me_id.found=${st.owner_me_id.found}，can_spend_now=${st.can_spend_now}`, expect: '-', ok: true, hash: '-', code: '-', note: (st.owner_me_id.error || st.owner_me_id.status || '').toString().slice(0, 160).replace(/\|/g, '/') });
+  if (phase === 'nodid') {
+    record(R, '店主沒有 ME ID → 額度內付款 0.05 MEC 應被擋（鏈上 Stargate 查 DID）', 'fail:owner has no ME ID',
+      await L.signAndBroadcast(agent, [L.M.execute(agent.address, contract, { spend: { to: seller, amount: String(MEC / 20n), memo: 'no-did' } })], FAIL_GAS));
+    console.log(`\n合約保留給 DID 下來後跑正向流程：node cli.js e2e-cw --contract ${contract}`);
+    return contract;
+  }
   const before = await L.getBalance(seller);
   record(R, '額度內付款 0.05 MEC（合約內即時查店主 ME ID）', 'success',
     await L.signAndBroadcast(agent, [L.M.execute(agent.address, contract, { spend: { to: seller, amount: String(MEC / 20n), memo: 'order-1' } })]));
   console.log(`seller balance +${(await L.getBalance(seller)) - before} umec`);
-  record(R, '超過單筆上限 0.2 MEC', 'fail',
-    await L.signAndBroadcast(agent, [L.M.execute(agent.address, contract, { spend: { to: seller, amount: String(MEC / 5n), memo: 'too-big' } })]));
-  record(R, '超過每期額度（再付 0.1，累計 0.15 超過剩餘 0.1）', 'fail',
-    await L.signAndBroadcast(agent, [L.M.execute(agent.address, contract, { spend: { to: seller, amount: String(MEC / 10n + 1n), memo: 'period' } })]));
-  record(R, '付給不在 allowed_recipients 的地址', 'fail',
-    await L.signAndBroadcast(agent, [L.M.execute(agent.address, contract, { spend: { to: owner.address, amount: '1000', memo: 'stranger' } })]));
+  record(R, '超過單筆上限 0.2 MEC', 'fail:per-tx limit',
+    await L.signAndBroadcast(agent, [L.M.execute(agent.address, contract, { spend: { to: seller, amount: String(MEC / 5n), memo: 'too-big' } })], FAIL_GAS));
+  record(R, '額度內再付 0.1 MEC（累計 0.15 = 每期上限）', 'success',
+    await L.signAndBroadcast(agent, [L.M.execute(agent.address, contract, { spend: { to: seller, amount: String(MEC / 10n), memo: 'order-2' } })]));
+  record(R, '超過每期額度（再付 0.00001 MEC）', 'fail:period allowance',
+    await L.signAndBroadcast(agent, [L.M.execute(agent.address, contract, { spend: { to: seller, amount: '1000', memo: 'period' } })], FAIL_GAS));
+  record(R, '付給不在 allowed_recipients 的地址', 'fail:not in allowed_recipients',
+    await L.signAndBroadcast(agent, [L.M.execute(agent.address, contract, { spend: { to: owner.address, amount: '1000', memo: 'stranger' } })], FAIL_GAS));
   record(R, '撤銷：revoke', 'success', await L.signAndBroadcast(owner, [L.M.execute(owner.address, contract, { revoke: { agent: agent.address } })]));
-  record(R, '撤銷後付款 0.01 MEC', 'fail',
-    await L.signAndBroadcast(agent, [L.M.execute(agent.address, contract, { spend: { to: seller, amount: String(MEC / 100n), memo: 'after-revoke' } })]));
+  record(R, '撤銷後付款 0.01 MEC', 'fail:mandate revoked',
+    await L.signAndBroadcast(agent, [L.M.execute(agent.address, contract, { spend: { to: seller, amount: String(MEC / 100n), memo: 'after-revoke' } })], FAIL_GAS));
   console.log('agent_status:', JSON.stringify(await L.smartQuery(contract, { agent_status: { agent: agent.address } })));
   record(R, '收尾：withdraw 剩餘預算', 'success',
     await L.signAndBroadcast(owner, [L.M.execute(owner.address, contract, { withdraw: { amount: null } })]));
+  return contract;
 }
+
+function argOf(args, name) { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : undefined; }
 
 (async () => {
   const [cmd, ...args] = process.argv.slice(2);
@@ -126,7 +152,7 @@ async function e2eCw(wasmPath, codeIdArg) {
     else if (cmd === 'did') console.log(JSON.stringify(await L.getDid(args[0]), null, 2));
     else if (cmd === 'probe-sim') await probeSim(args[0]);
     else if (cmd === 'e2e-authz') { await e2eAuthz(); flushLog('路線 2 authz 實測'); }
-    else if (cmd === 'e2e-cw') { const i = args.indexOf('--code-id'); await e2eCw(args[0], i >= 0 ? args[i + 1] : undefined); flushLog('路線 1 CosmWasm 實測'); }
+    else if (cmd === 'e2e-cw') { const phase = argOf(args, '--phase'); await e2eCw(args[0] && !args[0].startsWith('--') ? args[0] : undefined, { phase, codeId: argOf(args, '--code-id'), contract: argOf(args, '--contract') }); flushLog(`路線 1 CosmWasm 實測${phase === 'nodid' ? '（店主尚無 ME ID）' : ''}`); }
     else if (cmd === 'e2e') { await e2eAuthz(); await e2eCw(args[0]); flushLog('兩條路線實測'); }
     else { console.log(fs.readFileSync(__filename, 'utf8').split('\n').slice(1, 9).join('\n')); }
   } catch (e) {

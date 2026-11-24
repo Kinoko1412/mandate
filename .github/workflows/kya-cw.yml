@@ -51,6 +51,15 @@ jobs:
           sudo chown -R "$(id -u)" artifacts
           sha256sum artifacts/kya_cw.wasm | tee artifacts/kya_cw.wasm.sha256
           ls -l artifacts
+      # ME 測試網的 Gatekeeper 會拒絕浮點指令；cosmwasm-check 1.5.8 沒抓到（2026-11-24 實測），所以另外掃
+      - name: 檢查浮點指令
+        working-directory: contracts/kya-cw
+        run: |
+          sudo apt-get install -y -qq wabt >/dev/null
+          if wasm-objdump -d artifacts/kya_cw.wasm | grep -E '\bf(32|64)\.' | head -20 | grep .; then
+            echo "::error::wasm contains float instructions"; exit 1
+          fi
+          echo "no float instructions"
       - uses: actions/upload-artifact@v4
         with:
           name: kya-cw-wasm

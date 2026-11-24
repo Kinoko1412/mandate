@@ -61,3 +61,22 @@ node cli.js e2e-cw ../../contracts/kya-cw/artifacts/kya_cw.wasm
 
 ## 實測紀錄
 （`cli.js` 會把每筆交易附加在這一節下面）
+
+
+### 路線 2 authz 實測（2026-11-24T08:05:47.282Z，chain-id mechain_400-1）
+
+| 路線 | 步驟 | 預期 | 結果 | code | tx hash | 鏈上訊息 |
+|---|---|---|---|---|---|---|
+| 路線2 authz | 授權：MsgGrant(SendAuthorization 0.1 MEC, allow_list=[seller]) + MsgGrantAllowance | success | ✅ | 0 | `76CC15567CA145D6E6CC3968A1AA1605BD49E05146ABC39FFD2C470465539F71` | [{"msg_index":0,"events":[{"type":"message","attributes":[{"key":"action","value":"/cosmos.authz.v1beta1.MsgGrant"},{"key":"sender","value":"me1hxf7vagxkklc59wgs4h7nudc5ts0nrnrglaw7c"},{"key":"module" |
+| 路線2 authz | 額度內付款 0.05 MEC（MsgExec，手續費由 feegrant 付） | success | ✅ | 0 | `72DF3726FE94F0618AA8756CB08035DDEEDC9A89D0E7F49AA9132166068308F5` | [{"msg_index":0,"events":[{"type":"message","attributes":[{"key":"action","value":"/cosmos.authz.v1beta1.MsgExec"},{"key":"sender","value":"me1hjgw84q08gy9h09kuwl6nds5h92ggvj70w5rq7"},{"key":"module", |
+| 路線2 authz | 超額 0.08 MEC（剩餘額度 0.05） | fail | ✅ | 5 | `F570D6FAF8F6CE6DA50C821A4A13C88F6E54A0E7B9B312C5FA089C5E2E286C31` | failed to execute message; message index: 0: requested amount is more than spend limit: insufficient funds |
+| 路線2 authz | 付給不在 allow_list 的地址 | fail | ✅ | 4 | `D5C08F29EF20531A34C07982A6B2DFF270EC8A14A8CCD516EF5111458FF06A18` | failed to execute message; message index: 0: cannot send to me1hxf7vagxkklc59wgs4h7nudc5ts0nrnrglaw7c address: unauthorized（已人工核對：這是 SDK SendAuthorization 的 allow_list 拒絕訊息；第一次跑時腳本的比對字串沒涵蓋這句，所以自動判成 ❌） |
+| 路線2 authz | 撤銷：MsgRevoke | success | ✅ | 0 | `8ED5DC1F43A3D188B8721D72F55D7BF37E7B149EC0DB94341999AB53C0119083` | [{"msg_index":0,"events":[{"type":"message","attributes":[{"key":"action","value":"/cosmos.authz.v1beta1.MsgRevoke"},{"key":"sender","value":"me1hxf7vagxkklc59wgs4h7nudc5ts0nrnrglaw7c"},{"key":"module |
+| 路線2 authz | 撤銷後付款 0.01 MEC | fail | ✅ | 2 | `3412A6219E8DF9B96B7484C8B830909357DC49C99A55CD80CA01C06A905C89F1` | failed to execute message; message index: 0: failed to update grant with key ?????u??????o???????c??????:?[??????T?2^/cosmos.bank.v1beta1.MsgSend: authorization not found |
+| 路線2 authz | 收尾：MsgRevokeAllowance | success | ✅ | 0 | `079BC3CE3CFB7DA3747B11E301498B92B44FBC636D492AAB8E97999B6CFA0992` | [{"msg_index":0,"events":[{"type":"message","attributes":[{"key":"action","value":"/cosmos.feegrant.v1beta1.MsgRevokeAllowance"},{"key":"sender","value":"me1hxf7vagxkklc59wgs4h7nudc5ts0nrnrglaw7c"},{" |
+
+### 路線 1 CosmWasm 實測（店主尚無 ME ID）（2026-11-24T08:05:59.407Z，chain-id mechain_400-1）
+
+| 路線 | 步驟 | 預期 | 結果 | code | tx hash | 鏈上訊息 |
+|---|---|---|---|---|---|---|
+| 路線1 CosmWasm | MsgStoreCode（wasm sha256 78159810e83a…） | success | ❌ | -1 | `(simulate)` | failed to execute message; message index: 0: Error calling the VM: Error compiling Wasm: Could not compile: WebAssembly translation error: Error in middleware Gatekeeper: Float operator detected: F32L |
