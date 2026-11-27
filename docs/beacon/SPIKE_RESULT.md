@@ -14,6 +14,7 @@
   - **新證實**：DID 存在時，合約透過 Stargate 拿到的 JSON 在鏈上能正確解析（`found=true`、`status=DID_STATUS_ACTIVE`、`kyc_level=2`），和 REST 的格式一致。
   - 測試網 `did_infos` 一共 258 筆，全部是 ACTIVE（TWO 165、ONE 93），找不到 INACTIVE 或 NONE 的地址，所以「DID 停用被擋」只在 cw-multi-test 驗證過。
   - 正式版（code_id 37，合約 `me1pkm9…dce3`）的邏輯沒有動。店主拿到 ME ID 後再跑 `node cli.js e2e-cw --contract me1pkm9d3556jcnvnfgxmfa0mzrf0t59c43fx53mz32yvmpfvyq2s8qx0dce3`。下表裡「合約內即時查店主 ME ID」那一步，在測試變體實際查的是 did_subject。
+- **正式版（2026-11-27）：店主本人的 Testnet ME ID（ACTIVE／KYC_LEVEL_ONE）核發後，code_id 37 合約完整流程全部通過**，見實測紀錄「正式版：店主本人的 Testnet ME ID」。路線 1 的 Day-1 問題已經回答完畢。
 - **建議：路線 1 為主。** 只有路線 1 能做到「背後是 ME ID 由鏈上強制檢查」，交易也只有一筆 MsgExecuteContract，可以拿 40% 手續費分潤。路線 2 當備援，或拿來對照說明「為什麼需要合約」。
 
 ### 踩到的坑（已修）
@@ -130,3 +131,33 @@ node cli.js e2e-cw ../../contracts/kya-cw/artifacts/kya_cw.wasm
 | 路線1 TEST-ONLY 借用DID | query agent_status：owner_me_id.found=true，can_spend_now=false | - | ✅ | - | `-` | DID_STATUS_ACTIVE |
 | 路線1 TEST-ONLY 借用DID | did_subject 等級低於門檻（min_kyc_level=2）→ 付款 0.01 MEC 應被擋 | fail | ✅ | 5 | `24C3C1B2F5F041965256BA32C38FA2DC9918F0BD986AE3B3958BC92ECD32E4E4` | failed to execute message; message index: 0: owner ME ID not eligible: status=DID_STATUS_ACTIVE kyc_level=1 (need ACTIVE and >= 2): execute wasm contract failed |
 | 路線1 TEST-ONLY 借用DID | 收尾：withdraw 剩餘預算 | success | ✅ | 0 | `5397539A289A508BBAA325F6C8B997E13FA7009848BFEBCA1FA7AEB1A4AE344B` | [{"msg_index":0,"events":[{"type":"message","attributes":[{"key":"action","value":"/cosmwasm.wasm.v1.MsgExecuteContract"},{"key":"sender","value":"me1hxf7vagxkklc59wgs4h7nudc5ts0nrnrglaw7c"},{"key":"m |
+
+### 正式版：店主本人的 Testnet ME ID（2026-11-27T13:27:44.736Z，chain-id mechain_400-1）
+
+> 合約：`me1pkm9d3556jcnvnfgxmfa0mzrf0t59c43fx53mz32yvmpfvyq2s8qx0dce3`（**code_id 37，正式版，沒有 test-did-subject**，wasm sha256 `42a7d5a799c87b68bf904131a49edea54df8e7073c61481f8fef769868af74db`），min_kyc_level 1。
+> 店主 `me1hxf7vagxkklc59wgs4h7nudc5ts0nrnrglaw7c` 本人的 Testnet ME ID：DID `2611270190602`，`DID_STATUS_ACTIVE`，`KYC_LEVEL_ONE`（2026-11-27 開跑前用 REST 確認；agent_status 的 owner_me_id 也回傳 found=true、kyc_level=1）。
+> 結果：**全部符合預期**。被擋的 4 筆都已用 `GET /cosmos/tx/v1beta1/txs/{hash}` 確認在鏈上（code 5，高度 5545434／5545436／5545437／5545439）。合約留 0.2 MEC 給之後的 Demo（代理授權已撤銷，Demo 前要重新 grant）。
+>
+> 對照（店主還沒有 ME ID 時，同一份合約）：
+>
+> | 步驟 | 結果 | code | tx hash（高度） | 鏈上訊息 |
+> |---|---|---|---|---|
+> | 店主沒有 ME ID → 額度內付款 0.05 MEC | 被擋 ✅ | 5 | `45FF1EC7B4DB6F454F9B808283F184193116205D504DCEA4CBC47D6E76FE13D3`（5488933） | owner has no ME ID on chain: codespace: did, code: 111 |
+>
+> 同一份合約、同一個店主，從「沒有 ME ID 被擋」變成「有 ME ID 就放行，但額度和撤銷照樣擋」，ME ID 確實是鏈上強制的條件。
+>
+> 旁註（**未驗證**）：店主 DID 記錄裡的 `pubkey` 欄位（`A9E0wO8B…Vcgu`），和 11-27 測試用變體拿來當反例的 `me1p4che2r9385jqdtgshl5qs3pj32ezf56yzulzp`（DID 2611274500943，KYC_LEVEL_ONE）的 pubkey 相同。那個地址可能是使用者本人的 ME Pass 帳號，不是陌生人的帳號。
+
+
+| 路線 | 步驟 | 預期 | 結果 | code | tx hash | 鏈上訊息 |
+|---|---|---|---|---|---|---|
+| 路線1 CosmWasm | 授權：grant（單筆 0.1、每日 0.15 MEC、7 天、allowed=[seller]） | success | ✅ | 0 | `05D36271DF1BCBC914A509E9CDCDF97393A572A5018945D653484C2792B751D4` | [{"msg_index":0,"events":[{"type":"message","attributes":[{"key":"action","value":"/cosmwasm.wasm.v1.MsgExecuteContract"},{"key":"sender","value":"me1hxf7vagxkklc59wgs4h7nudc5ts0nrnrglaw7c"},{"key":"m |
+| 路線1 CosmWasm | query agent_status：owner_me_id.found=true，can_spend_now=true | - | ✅ | - | `-` | DID_STATUS_ACTIVE |
+| 路線1 CosmWasm | 額度內付款 0.05 MEC（合約內即時查店主 ME ID） | success | ✅ | 0 | `C4501730BEF5039A6BD1E24E037B5C7C3635D731352B2C743576D007F3863112` | [{"msg_index":0,"events":[{"type":"message","attributes":[{"key":"action","value":"/cosmwasm.wasm.v1.MsgExecuteContract"},{"key":"sender","value":"me1hjgw84q08gy9h09kuwl6nds5h92ggvj70w5rq7"},{"key":"m |
+| 路線1 CosmWasm | 超過單筆上限 0.2 MEC | fail | ✅ | 5 | `3C98A0B879C26C8A9F1FAA02DBEEB11BDB4A0CB77E3CB346E2926926955BDAA1` | failed to execute message; message index: 0: amount 20000000 exceeds per-tx limit 10000000: execute wasm contract failed |
+| 路線1 CosmWasm | 額度內再付 0.1 MEC（累計 0.15 = 每期上限） | success | ✅ | 0 | `51F2C80E932A178CEB77A253DFAAEFABD98D22754E631F8FCBA2006B8BDDF047` | [{"msg_index":0,"events":[{"type":"message","attributes":[{"key":"action","value":"/cosmwasm.wasm.v1.MsgExecuteContract"},{"key":"sender","value":"me1hjgw84q08gy9h09kuwl6nds5h92ggvj70w5rq7"},{"key":"m |
+| 路線1 CosmWasm | 超過每期額度（再付 0.00001 MEC） | fail | ✅ | 5 | `816D7A82C1D9F9FC340E216DD75330C2B6EDD6AEDD38CBCFE3FC45983ED94BAF` | failed to execute message; message index: 0: amount 1000 exceeds remaining period allowance 0: execute wasm contract failed |
+| 路線1 CosmWasm | 付給不在 allowed_recipients 的地址 | fail | ✅ | 5 | `34DA9E5347DD017E87AE34CCF65850D1A2BD70DD5C0379B811FC83DE9D713F26` | failed to execute message; message index: 0: recipient me1hxf7vagxkklc59wgs4h7nudc5ts0nrnrglaw7c is not in allowed_recipients: execute wasm contract failed |
+| 路線1 CosmWasm | 撤銷：revoke | success | ✅ | 0 | `3CB2CAA78C5927D334D4A7CA6A04509B33AF3E225062EC22A5BEFD4ECC9E4C33` | [{"msg_index":0,"events":[{"type":"message","attributes":[{"key":"action","value":"/cosmwasm.wasm.v1.MsgExecuteContract"},{"key":"sender","value":"me1hxf7vagxkklc59wgs4h7nudc5ts0nrnrglaw7c"},{"key":"m |
+| 路線1 CosmWasm | 撤銷後付款 0.01 MEC | fail | ✅ | 5 | `8C219D9BFC08432FFEA27BD9D4C45414D887A4312B6FB57E75CC0CAA345B99B4` | failed to execute message; message index: 0: mandate revoked: execute wasm contract failed |
+| 路線1 CosmWasm | 收尾：withdraw 0.15 MEC，合約留 0.2 MEC 給 Demo | success | ✅ | 0 | `544BE1F5AC5306A906BF56317A52C6E27E7B157BE57DA718F7F52D2AE20ECD71` | [{"msg_index":0,"events":[{"type":"message","attributes":[{"key":"action","value":"/cosmwasm.wasm.v1.MsgExecuteContract"},{"key":"sender","value":"me1hxf7vagxkklc59wgs4h7nudc5ts0nrnrglaw7c"},{"key":"m |

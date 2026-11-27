@@ -156,8 +156,15 @@ async function e2eCw(wasmPath, opts = {}) {
   record(R, '撤銷後付款 0.01 MEC', 'fail:mandate revoked',
     await L.signAndBroadcast(agent, [L.M.execute(agent.address, contract, { spend: { to: seller, amount: String(MEC / 100n), memo: 'after-revoke' } })], FAIL_GAS));
   console.log('agent_status:', JSON.stringify(await L.smartQuery(contract, { agent_status: { agent: agent.address } })));
-  record(R, '收尾：withdraw 剩餘預算', 'success',
-    await L.signAndBroadcast(owner, [L.M.execute(owner.address, contract, { withdraw: { amount: null } })]));
+  if (opts.keep) {
+    const bal = BigInt((await L.smartQuery(contract, { config: {} })).balance.amount);
+    const amt = bal > opts.keep ? bal - opts.keep : 0n;
+    record(R, `收尾：withdraw ${Number(amt) / 1e8} MEC，合約留 ${Number(bal - amt) / 1e8} MEC 給 Demo`, 'success',
+      await L.signAndBroadcast(owner, [L.M.execute(owner.address, contract, { withdraw: { amount: String(amt) } })]));
+  } else {
+    record(R, '收尾：withdraw 剩餘預算', 'success',
+      await L.signAndBroadcast(owner, [L.M.execute(owner.address, contract, { withdraw: { amount: null } })]));
+  }
   return contract;
 }
 
@@ -199,7 +206,7 @@ function argOf(args, name) { const i = args.indexOf(name); return i >= 0 ? args[
       }
       flushLog('測試用變體：借用他人公開 DID，只證明合約邏輯，不能當 Demo');
     }
-    else if (cmd === 'e2e-cw') { const phase = argOf(args, '--phase'); await e2eCw(args[0] && !args[0].startsWith('--') ? args[0] : undefined, { phase, codeId: argOf(args, '--code-id'), contract: argOf(args, '--contract') }); flushLog(`路線 1 CosmWasm 實測${phase === 'nodid' ? '（店主尚無 ME ID）' : ''}`); }
+    else if (cmd === 'e2e-cw') { const phase = argOf(args, '--phase'); const keep = argOf(args, '--keep-umec'); await e2eCw(args[0] && !args[0].startsWith('--') ? args[0] : undefined, { phase, codeId: argOf(args, '--code-id'), contract: argOf(args, '--contract'), keep: keep ? BigInt(keep) : undefined }); flushLog(argOf(args, '--title') || `路線 1 CosmWasm 實測${phase === 'nodid' ? '（店主尚無 ME ID）' : ''}`); }
     else if (cmd === 'e2e') { await e2eAuthz(); await e2eCw(args[0]); flushLog('兩條路線實測'); }
     else { console.log(fs.readFileSync(__filename, 'utf8').split('\n').slice(1, 9).join('\n')); }
   } catch (e) {
