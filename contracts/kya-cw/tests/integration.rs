@@ -87,6 +87,10 @@ struct Env {
 }
 
 fn setup(min_kyc_level: u8, owner_did: Option<(&'static str, &'static str)>) -> Env {
+    setup_inner(min_kyc_level, owner_did, None)
+}
+
+fn setup_inner(min_kyc_level: u8, owner_did: Option<(&'static str, &'static str)>, subject: Option<(&'static str, &'static str, &'static str)>) -> Env {
     let owner = Addr::unchecked("owner");
     let agent = Addr::unchecked("agent");
     let seller = Addr::unchecked("seller");
@@ -95,13 +99,16 @@ fn setup(min_kyc_level: u8, owner_did: Option<(&'static str, &'static str)>) -> 
     if let Some(d) = owner_did {
         dids.borrow_mut().insert(owner.to_string(), d);
     }
+    if let Some((addr, st, kyc)) = subject {
+        dids.borrow_mut().insert(addr.to_string(), (st, kyc));
+    }
     let o = owner.clone();
     let mut app = AppBuilder::default().with_stargate(MockMeDid(dids.clone())).build(|router, _api, storage| {
         router.bank.init_balance(storage, &o, coins(1_000_000_000, DENOM)).unwrap();
     });
     let code_id = app.store_code(Box::new(ContractWrapper::new(execute, instantiate, query)));
     let contract = app
-        .instantiate_contract(code_id, owner.clone(), &InstantiateMsg { min_kyc_level, denom: DENOM.into() }, &coins(50_000_000, DENOM), "kya", None)
+        .instantiate_contract(code_id, owner.clone(), &inst_msg(min_kyc_level, subject.map(|s| s.0)), &coins(50_000_000, DENOM), "kya", None)
         .unwrap();
     Env { app, dids, contract, owner, agent, seller, stranger }
 }
@@ -214,4 +221,70 @@ fn expiry_and_owner_only() {
     let before = bal(&e, &e.owner.clone());
     e.app.execute_contract(e.owner.clone(), c, &ExecuteMsg::Withdraw { amount: None }, &[]).unwrap();
     assert_eq!(bal(&e, &e.owner.clone()) - before, 50_000_000);
+}
+
+#[allow(unused_variables)]
+fn inst_msg(min_kyc_level: u8, subject: Option<&str>) -> InstantiateMsg {
+    #[allow(unused_mut)]
+    let mut m = InstantiateMsg { min_kyc_level, denom: DENOM.into(), ..Default::default() };
+    #[cfg(feature = "test-did-subject")]
+    {
+        m.did_subject = subject.map(|s| s.to_string());
+    }
+    m
+}
+
+#[test]
+fn production_build_checks_owner_and_is_not_test_only() {
+    let e = setup(1, Some(("DID_STATUS_ACTIVE", "KYC_LEVEL_ONE")));
+    let c: kya_cw::msg::ConfigResponse = e.app.wrap().query_wasm_smart(&e.contract, &QueryMsg::Config {}).unwrap();
+    assert_eq!(c.did_subject, None);
+    assert!(!c.test_only);
+    let s: AgentStatusResponse = e.app.wrap().query_wasm_smart(&e.contract, &QueryMsg::AgentStatus { agent: e.agent.to_string() }).unwrap();
+    assert_eq!(s.me_id_subject, e.owner.to_string());
+}
+
+#[cfg(feature = "test-did-subject")]
+mod test_did_subject {
+    use super::*;
+
+    #[test]
+    fn borrowed_subject_full_flow_owner_has_no_did() {
+        // 店主沒有 DID，借用 subject（ACTIVE / TWO）
+        let mut e = setup_inner(1, None, Some(("subject", "DID_STATUS_ACTIVE", "KYC_LEVEL_TWO")));
+        let c: kya_cw::msg::ConfigResponse = e.app.wrap().query_wasm_smart(&e.contract, &QueryMsg::Config {}).unwrap();
+        assert_eq!(c.did_subject.as_deref(), Some("subject"));
+        assert!(c.test_only);
+        let allowed = vec![e.seller.to_string()];
+        grant(&mut e, Some(allowed), 7 * 86_400).unwrap();
+        let seller = e.seller.clone();
+        spend(&mut e, &seller, 5_000_000).unwrap();
+        assert!(matches!(err_of(spend(&mut e, &seller, 20_000_000)), ContractError::OverPerTxLimit { .. }));
+        spend(&mut e, &seller, 10_000_000).unwrap();
+        assert!(matches!(err_of(spend(&mut e, &seller, 1)), ContractError::OverPeriodLimit { .. }));
+        e.app.execute_contract(e.owner.clone(), e.contract.clone(), &ExecuteMsg::Revoke { agent: e.agent.to_string() }, &[]).unwrap();
+        assert_eq!(err_of(spend(&mut e, &seller, 1)), ContractError::Revoked {});
+        let s: AgentStatusResponse = e.app.wrap().query_wasm_smart(&e.contract, &QueryMsg::AgentStatus { agent: e.agent.to_string() }).unwrap();
+        assert_eq!(s.me_id_subject, "subject");
+    }
+
+    #[test]
+    fn borrowed_subject_below_threshold_is_blocked() {
+        let mut e = setup_inner(2, Some(("DID_STATUS_ACTIVE", "KYC_LEVEL_TWO")), Some(("subject", "DID_STATUS_ACTIVE", "KYC_LEVEL_ONE")));
+        grant(&mut e, None, 3600).unwrap();
+        let seller = e.seller.clone();
+        // 店主本人等級夠也沒用：被檢查的是 subject
+        assert!(matches!(err_of(spend(&mut e, &seller, 1)), ContractError::OwnerNotEligible { kyc_level: 1, min: 2, .. }));
+    }
+
+    #[test]
+    fn subject_cannot_control_funds() {
+        let mut e = setup_inner(1, None, Some(("subject", "DID_STATUS_ACTIVE", "KYC_LEVEL_TWO")));
+        let c = e.contract.clone();
+        let r = e.app.execute_contract(Addr::unchecked("subject"), c.clone(), &ExecuteMsg::Withdraw { amount: None }, &[]);
+        assert_eq!(err_of(r), ContractError::Unauthorized {});
+        let agent = e.agent.to_string();
+        let r = e.app.execute_contract(Addr::unchecked("subject"), c, &ExecuteMsg::Revoke { agent }, &[]);
+        assert_eq!(err_of(r), ContractError::Unauthorized {});
+    }
 }

@@ -12,6 +12,9 @@ crate-type = ["cdylib", "rlib"]
 
 [features]
 library = []
+# TEST ONLY：允許 instantiate 時指定 did_subject，spend 改查這個地址的 ME ID（借用他人公開 DID 驗證合約邏輯）。
+# 正式版不開；CI 另外建一份 kya_cw_testdid.wasm。
+test-did-subject = []
 
 [profile.release]
 opt-level = 3

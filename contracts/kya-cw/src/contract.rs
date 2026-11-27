@@ -17,8 +17,16 @@ pub fn instantiate(deps: DepsMut, _env: Env, info: MessageInfo, msg: Instantiate
     if msg.min_kyc_level > 2 {
         return Err(ContractError::Invalid { msg: "min_kyc_level must be 0..=2".into() });
     }
-    CONFIG.save(deps.storage, &Config { owner: info.sender.clone(), denom: msg.denom, min_kyc_level: msg.min_kyc_level })?;
-    Ok(Response::new().add_attribute("action", "instantiate").add_attribute("owner", info.sender))
+    #[cfg(feature = "test-did-subject")]
+    let did_subject = msg.did_subject.as_deref().map(|a| deps.api.addr_validate(a)).transpose()?;
+    #[cfg(not(feature = "test-did-subject"))]
+    let did_subject: Option<Addr> = None;
+    CONFIG.save(deps.storage, &Config { owner: info.sender.clone(), denom: msg.denom, min_kyc_level: msg.min_kyc_level, did_subject: did_subject.clone() })?;
+    let mut res = Response::new().add_attribute("action", "instantiate").add_attribute("owner", info.sender);
+    if let Some(s) = did_subject {
+        res = res.add_attribute("did_subject", s).add_attribute("test_only", "TEST ONLY: borrowed public DID, not a demo");
+    }
+    Ok(res)
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]
@@ -98,7 +106,7 @@ fn only_owner(deps: Deps, info: &MessageInfo) -> Result<Config, ContractError> {
 
 /// 鏈上強制：店主要有 ACTIVE 的 ME ID，而且 KYC 等級夠
 fn check_owner_me_id(deps: Deps, cfg: &Config) -> Result<(), ContractError> {
-    let (info, err) = query_did(&deps.querier, cfg.owner.as_str())?;
+    let (info, err) = query_did(&deps.querier, cfg.me_id_subject().as_str())?;
     let info = info.ok_or(ContractError::OwnerNoMeId { reason: err.unwrap_or_default() })?;
     let lvl = kyc_level_num(&info.kyc_level);
     if !status_is_active(&info.status) || lvl < cfg.min_kyc_level {
@@ -161,11 +169,12 @@ pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
     let cfg = CONFIG.load(deps.storage)?;
     let balance = deps.querier.query_balance(&env.contract.address, &cfg.denom)?;
     match msg {
-        QueryMsg::Config {} => to_json_binary(&ConfigResponse { owner: cfg.owner.to_string(), denom: cfg.denom, min_kyc_level: cfg.min_kyc_level, balance }),
+        QueryMsg::Config {} => to_json_binary(&ConfigResponse { owner: cfg.owner.to_string(), denom: cfg.denom.clone(), min_kyc_level: cfg.min_kyc_level, balance, did_subject: cfg.did_subject.as_ref().map(|a| a.to_string()), test_only: cfg.did_subject.is_some() }),
         QueryMsg::AgentStatus { agent } => {
             let agent = deps.api.addr_validate(&agent)?;
             let now = env.block.time.seconds();
-            let (did, err) = query_did(&deps.querier, cfg.owner.as_str())?;
+            let subject = cfg.me_id_subject().to_string();
+            let (did, err) = query_did(&deps.querier, &subject)?;
             let owner_me_id = match &did {
                 Some(i) => MeIdView { found: true, did: Some(i.did.clone()), status: Some(i.status.clone()), kyc_level: Some(kyc_level_num(&i.kyc_level)), error: None },
                 None => MeIdView { found: false, did: None, status: None, kyc_level: None, error: err },
@@ -173,7 +182,7 @@ pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
             let eligible = did.as_ref().map(|i| status_is_active(&i.status) && kyc_level_num(&i.kyc_level) >= cfg.min_kyc_level).unwrap_or(false);
             let resp = match MANDATES.may_load(deps.storage, &agent)? {
                 None => AgentStatusResponse {
-                    agent: agent.to_string(), owner: cfg.owner.to_string(), has_mandate: false, revoked: false, expired: false,
+                    agent: agent.to_string(), owner: cfg.owner.to_string(), me_id_subject: subject.clone(), has_mandate: false, revoked: false, expired: false,
                     per_tx_limit: Uint128::zero(), period_limit: Uint128::zero(), remaining_in_period: Uint128::zero(), expires_at: 0,
                     allowed_recipients: None, total_spent: Uint128::zero(), owner_me_id, can_spend_now: false, contract_balance: balance,
                 },
@@ -181,7 +190,7 @@ pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
                     m.roll(now);
                     let expired = now >= m.expires_at;
                     AgentStatusResponse {
-                        agent: agent.to_string(), owner: cfg.owner.to_string(), has_mandate: true, revoked: m.revoked, expired,
+                        agent: agent.to_string(), owner: cfg.owner.to_string(), me_id_subject: subject.clone(), has_mandate: true, revoked: m.revoked, expired,
                         per_tx_limit: m.per_tx_limit, period_limit: m.period_limit, remaining_in_period: m.remaining(), expires_at: m.expires_at,
                         allowed_recipients: m.allowed_recipients.as_ref().map(|l| l.iter().map(|a| a.to_string()).collect()),
                         total_spent: m.total_spent, owner_me_id,

@@ -7,6 +7,16 @@ pub struct Config {
     pub owner: Addr,
     pub denom: String,
     pub min_kyc_level: u8,
+    /// TEST ONLY（feature test-did-subject）：有值時 spend 查這個地址的 ME ID，不查店主
+    #[serde(default)]
+    pub did_subject: Option<Addr>,
+}
+
+impl Config {
+    /// spend 時要查 ME ID 的地址：正式版一律是店主
+    pub fn me_id_subject(&self) -> &Addr {
+        self.did_subject.as_ref().unwrap_or(&self.owner)
+    }
 }
 
 #[cw_serde]

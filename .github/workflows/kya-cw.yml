@@ -27,6 +27,8 @@ jobs:
           fi
       - name: Unit + cw-multi-test
         run: cargo test --locked -- --nocapture
+      - name: Unit + cw-multi-test（TEST ONLY 變體：test-did-subject）
+        run: cargo test --locked --features test-did-subject -- --nocapture
       - uses: actions/upload-artifact@v4
         with:
           name: kya-cw-cargo-lock
@@ -51,15 +53,33 @@ jobs:
           sudo chown -R "$(id -u)" artifacts
           sha256sum artifacts/kya_cw.wasm | tee artifacts/kya_cw.wasm.sha256
           ls -l artifacts
+      # TEST ONLY 變體：optimizer 不吃 --features，所以複製一份 crate、把 test-did-subject 設成 default 再建
+      - name: optimizer（TEST ONLY 變體 kya_cw_testdid.wasm）
+        run: |
+          rm -rf /tmp/kya-cw-testdid && cp -r contracts/kya-cw /tmp/kya-cw-testdid
+          cd /tmp/kya-cw-testdid && sudo rm -rf artifacts target
+          sed -i 's/^test-did-subject = \[\]$/test-did-subject = []\ndefault = ["test-did-subject"]/' Cargo.toml
+          grep -n '^default' Cargo.toml
+          docker run --rm -v "$PWD":/code \
+            --mount type=volume,source=kya_cw_testdid_cache,target=/target \
+            --mount type=volume,source=registry_cache,target=/usr/local/cargo/registry \
+            cosmwasm/optimizer:0.15.1
+          sudo chown -R "$(id -u)" artifacts
+          cp artifacts/kya_cw.wasm "$GITHUB_WORKSPACE/contracts/kya-cw/artifacts/kya_cw_testdid.wasm"
+          cd "$GITHUB_WORKSPACE/contracts/kya-cw"
+          sha256sum artifacts/kya_cw_testdid.wasm | tee artifacts/kya_cw_testdid.wasm.sha256
+          if cmp -s artifacts/kya_cw.wasm artifacts/kya_cw_testdid.wasm; then echo "::error::test variant identical to production"; exit 1; fi
       # ME 測試網的 Gatekeeper 會拒絕浮點指令；cosmwasm-check 1.5.8 沒抓到（2026-11-24 實測），所以另外掃
       - name: 檢查浮點指令
         working-directory: contracts/kya-cw
         run: |
           sudo apt-get install -y -qq wabt >/dev/null
-          if wasm-objdump -d artifacts/kya_cw.wasm | grep -E '\bf(32|64)\.' | head -20 | grep .; then
-            echo "::error::wasm contains float instructions"; exit 1
-          fi
-          echo "no float instructions"
+          for w in artifacts/kya_cw.wasm artifacts/kya_cw_testdid.wasm; do
+            if wasm-objdump -d "$w" | grep -E '\bf(32|64)\.' | head -20 | grep .; then
+              echo "::error::$w contains float instructions"; exit 1
+            fi
+            echo "$w: no float instructions"
+          done
       - uses: actions/upload-artifact@v4
         with:
           name: kya-cw-wasm
@@ -68,15 +88,21 @@ jobs:
             contracts/kya-cw/artifacts/kya_cw.wasm.sha256
             contracts/kya-cw/artifacts/checksums.txt
             contracts/kya-cw/Cargo.lock
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kya-cw-testdid-wasm-TEST-ONLY
+          path: |
+            contracts/kya-cw/artifacts/kya_cw_testdid.wasm
+            contracts/kya-cw/artifacts/kya_cw_testdid.wasm.sha256
       # cosmwasm-check 1.5 依賴舊版 wasmer/corosensei，用最新 Rust 連結會缺 __rust_probestack，所以固定 1.80
       - uses: dtolnay/rust-toolchain@1.80
       - name: cosmwasm-check（模擬 wasmvm 1.4 的 capabilities）
         run: |
           cargo +1.80 install cosmwasm-check --version 1.5.8 --locked
-          cosmwasm-check --available-capabilities iterator,staking,stargate,cosmwasm_1_1,cosmwasm_1_2,cosmwasm_1_3,cosmwasm_1_4 contracts/kya-cw/artifacts/kya_cw.wasm
+          cosmwasm-check --available-capabilities iterator,staking,stargate,cosmwasm_1_1,cosmwasm_1_2,cosmwasm_1_3,cosmwasm_1_4 contracts/kya-cw/artifacts/kya_cw.wasm contracts/kya-cw/artifacts/kya_cw_testdid.wasm
       - name: Summary
         run: |
-          echo "### kya_cw.wasm" >> "$GITHUB_STEP_SUMMARY"
+          echo "### kya_cw.wasm / kya_cw_testdid.wasm (TEST ONLY)" >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
-          cat contracts/kya-cw/artifacts/kya_cw.wasm.sha256 >> "$GITHUB_STEP_SUMMARY"
+          cat contracts/kya-cw/artifacts/kya_cw.wasm.sha256 contracts/kya-cw/artifacts/kya_cw_testdid.wasm.sha256 >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
